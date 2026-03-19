@@ -331,6 +331,32 @@ function displayResults(results) {
 }
 
 /**
+ * 获取难度对应的颜色
+ */
+function getDifficultyColor(difficulty) {
+  const colors = {
+    easy: '#ff1744',      // 花红色
+    normal: '#9ccc65',    // 草绿色
+    hard: '#0277bd',      // 蓝色系绿色
+    oni: '#c2185b',       // 深粉色
+    edit: '#6a1b9a'       // 深紫色
+  };
+  return colors[difficulty] || '#37474f';
+}
+
+/**
+ * 获取分支对应的颜色
+ */
+function getBranchColor(branchType) {
+  const colors = {
+    normal: '#546e7a',    // 深灰色
+    expert: '#0096d6',    // 青蓝色
+    master: '#ff6b9d'     // 粉红色
+  };
+  return colors[branchType] || '#37474f';
+}
+
+/**
  * 渲染当前行数据（支持排序）
  */
 function renderRows(rows = currentRows) {
@@ -348,6 +374,8 @@ function renderRows(rows = currentRows) {
 
     const diffLabel = DIFFICULTY_LABELS[row.difficulty] || row.difficulty;
     const branchLabel = BRANCH_LABELS[row.branchType] || '';
+    const diffColor = getDifficultyColor(row.difficulty);
+    const branchColor = getBranchColor(row.branchType);
 
     const text = `${row.category} ${row.songName} ${diffLabel} ${branchLabel}`.toLowerCase();
     if (keyword && !text.includes(keyword)) continue;
@@ -356,8 +384,8 @@ function renderRows(rows = currentRows) {
     tr.innerHTML = `
       <td>${row.category}</td>
       <td><strong>${row.songName}</strong></td>
-      <td>${diffLabel}</td>
-      <td>${branchLabel}</td>
+      <td style="color: ${diffColor}; font-weight: 600;">${diffLabel}</td>
+      <td style="color: ${branchColor}; font-weight: 600;">${branchLabel}</td>
       <td>${formatNumber(row.ratings.stamina)}</td>
       <td>${formatNumber(row.ratings.complex)}</td>
       <td>${formatNumber(row.ratings.complexRatio)}</td>
