@@ -419,10 +419,20 @@ function getBranchColor(branchType) {
  */
 function renderRows(rows = currentRows) {
   const keyword = searchInput.value.toLowerCase();
+  const renderList = [...rows];
+
+  if (sortState.col !== null && SORTABLE_COLS[sortState.col]) {
+    const field = SORTABLE_COLS[sortState.col];
+    renderList.sort((a, b) => {
+      const va = a.ratings[field] || 0;
+      const vb = b.ratings[field] || 0;
+      return sortState.asc ? va - vb : vb - va;
+    });
+  }
 
   resultsBody.innerHTML = '';
 
-  for (const row of rows) {
+  for (const row of renderList) {
     // 难度筛选
     if (diffFilter === 'oni+edit') {
       if (row.difficulty !== 'oni' && row.difficulty !== 'edit') continue;
@@ -549,14 +559,8 @@ document.addEventListener('DOMContentLoaded', () => {
       sortState.asc = false; // 数值列默认降序更实用
     }
 
-    const sorted = [...currentRows].sort((a, b) => {
-      const va = a.ratings[field] || 0;
-      const vb = b.ratings[field] || 0;
-      return sortState.asc ? va - vb : vb - va;
-    });
-
     updateSortHeaders();
-    renderRows(sorted);
+    renderRows();
   });
 
   initApp();
