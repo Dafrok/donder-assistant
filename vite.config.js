@@ -1,8 +1,20 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
+
+// 获取 git commit hash（短版本）
+let gitHash = 'unknown';
+try {
+  gitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+} catch (e) {
+  console.warn('未能获取 git hash');
+}
+
+// 获取构建时间
+const buildTime = new Date().toISOString();
 
 export default defineConfig({
   root: 'src',
@@ -39,6 +51,8 @@ export default defineConfig({
   },
   define: {
     'process.env.NODE_ENV': '"development"',
-    global: 'globalThis'
+    global: 'globalThis',
+    '__BUILD_TIME__': JSON.stringify(buildTime),
+    '__GIT_HASH__': JSON.stringify(gitHash)
   }
 });

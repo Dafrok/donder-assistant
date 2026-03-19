@@ -262,8 +262,9 @@ async function initApp() {
     calculatedSongsEl.textContent = '0';
 
     console.log('✅ 应用初始化完成，等待用户上传数据');
-    hideLoading();
-
+    hideLoading();    
+    // 初始化 footer
+    initializeFooter();
     // 空闲时预热 Python，减少点击计算时的“假死感”
     const warmup = () => {
       warmupPython()
@@ -572,6 +573,31 @@ uploadFolderInput.addEventListener('change', async (e) => {
 searchInput.addEventListener('input', () => {
   renderRows();
 });
+
+/**
+ * 初始化 footer
+ */
+function initializeFooter() {
+  const footer = document.getElementById('footer');
+  const buildTime = __BUILD_TIME__;
+  const gitHash = __GIT_HASH__;
+  
+  // 格式化时间为 YYYY-MM-DD HH:MM:SS
+  const date = new Date(buildTime);
+  const timeStr = date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  
+  footer.innerHTML = `
+    <div>部署时间: ${timeStr} | 版本: <a href="https://github.com/Dafrok/taiko-rating-app/commit/${gitHash}" target="_blank">${gitHash}</a></div>
+  `;
+}
 
 // 页面加载时初始化
 // (由上方 DOMContentLoaded 监听器统一处理)
