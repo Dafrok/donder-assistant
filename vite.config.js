@@ -15,7 +15,18 @@ export default defineConfig({
     outDir: '../dist',
     emptyOutDir: true,
     target: 'esnext',
-    minify: 'terser'
+    minify: 'terser',
+    assetsInlineLimit: 0,
+    rollupOptions: {
+      output: {
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name.endsWith('.py')) {
+            return 'assets/py/[name]-[hash][extname]';
+          }
+          return 'assets/[name]-[hash][extname]';
+        }
+      }
+    }
   },
   server: {
     port: 5173,

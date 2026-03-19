@@ -1,7 +1,14 @@
 /**
  * 计算引擎 - 使用 Pyodide 在浏览器中运行 Python
- * Pyodide 直接从 CDN 加载，Python 模块从 lib/py/ 加载
+ * Pyodide 直接从 CDN 加载，Python 模块从 assets 载入
  */
+
+// 导入 Python 模块 URL（Vite 会为这些文件添加 hash）
+import py体力Url from './assets/py/体力.py?url'
+import py复合Url from './assets/py/复合.py?url'
+import py节奏Url from './assets/py/节奏.py?url'
+import py高速Url from './assets/py/高速.py?url'
+import pyCalculatorUrl from './assets/py/calculator.py?url'
 
 let pyodideReady = false;
 let pyodide = null;
@@ -61,13 +68,13 @@ export async function loadPythonModules() {
     try {
       console.log('📦 加载 Python 模块...');
 
-      const baseUrl = import.meta.env.BASE_URL;
+      // 使用导入的 URL（带 hash）来 fetch Python 代码
       const moduleEntries = await Promise.all([
-        fetch(baseUrl + '体力.py').then(r => r.text()).then(code => ['体力.py', code]),
-        fetch(baseUrl + '复合.py').then(r => r.text()).then(code => ['复合.py', code]),
-        fetch(baseUrl + '节奏.py').then(r => r.text()).then(code => ['节奏.py', code]),
-        fetch(baseUrl + '高速.py').then(r => r.text()).then(code => ['高速.py', code]),
-        fetch(baseUrl + 'calculator.py').then(r => r.text()).then(code => ['calculator.py', code])
+        fetch(py体力Url).then(r => r.text()).then(code => ['体力.py', code]),
+        fetch(py复合Url).then(r => r.text()).then(code => ['复合.py', code]),
+        fetch(py节奏Url).then(r => r.text()).then(code => ['节奏.py', code]),
+        fetch(py高速Url).then(r => r.text()).then(code => ['高速.py', code]),
+        fetch(pyCalculatorUrl).then(r => r.text()).then(code => ['calculator.py', code])
       ]);
 
       await yieldToMain();
