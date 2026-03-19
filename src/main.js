@@ -239,7 +239,6 @@ async function handleImportedEntries(fileEntries, sourceLabel) {
     updateProgress(current, total);
   });
   allSongsData = importedSongs;
-  totalSongsEl.textContent = String(importedSongs.length);
   await runCalculation(importedSongs, sourceLabel);
 }
 
@@ -249,7 +248,6 @@ async function handleImportedEntries(fileEntries, sourceLabel) {
 function updateProgress(current, total) {
   const percentage = (current / total) * 100;
   progressFill.style.width = percentage + '%';
-  calculatedSongsEl.textContent = current;
 }
 
 /**
@@ -306,9 +304,11 @@ function displayResults(results) {
   tableWrapper.classList.add('has-data');
 
   currentRows = [];
+  let totalCharts = 0;
 
   for (const song of results) {
     const charts = Array.isArray(song.charts) ? song.charts : [];
+    totalCharts += charts.length;
 
     for (const chart of charts) {
       currentRows.push({
@@ -320,6 +320,10 @@ function displayResults(results) {
       });
     }
   }
+
+  // 更新状态栏
+  totalSongsEl.textContent = String(results.length);
+  calculatedSongsEl.textContent = String(totalCharts);
 
   sortState = { col: null, asc: true };
   updateSortHeaders();
