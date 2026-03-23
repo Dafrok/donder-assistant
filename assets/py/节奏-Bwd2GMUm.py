@@ -109,16 +109,14 @@ def calculate_rhythm_difficulty(arr, T):
 
             def get_filling_coeff(value):
             # 计算阈值
-            upper_threshold = 30 / 260 * 1000
-            lower_threshold = 30 / 375 * 1000
     
-            if value >= upper_threshold:
+            if value >= 30 / 260 * 1000:
                 return 1.0
-            elif value <= lower_threshold:
+            elif value <= 30 / 375 * 1000:
                 return 0.0
             else:
                 # 线性插值
-                return (value - lower_threshold) / (upper_threshold - lower_threshold)
+                return (value - 30 / 375 * 1000) / (30 / 260 * 1000 - 30 / 375 * 1000)
         
             # def get_filling_coeff(value):
             #     if value >= 100:
