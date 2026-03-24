@@ -364,8 +364,140 @@
         .footer a:hover {
             text-decoration: underline;
         }
+
+        tbody tr[data-song-index] {
+            cursor: pointer;
+        }
+
+        .gap-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1100;
+        }
+
+        .gap-modal-content {
+            width: min(800px, 92vw);
+            max-height: 80vh;
+            background: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .gap-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .gap-modal-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #37474f;
+        }
+
+        .gap-modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            color: #90a4ae;
+            cursor: pointer;
+            padding: 0 4px;
+            line-height: 1;
+        }
+
+        .gap-modal-close:hover {
+            color: #37474f;
+        }
+
+        .gap-modal-stats {
+            padding: 12px 20px;
+            background: #f5f5f5;
+            font-size: 0.85em;
+            color: #546e7a;
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .gap-modal-body {
+            flex: 1;
+            overflow: auto;
+            padding: 16px 20px;
+        }
+
+        .gap-bar {
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+            padding: 3px 0;
+            flex-wrap: wrap;
+        }
+
+        .gap-bar:hover {
+            background: #f5f7fa;
+        }
+
+        .gap-bar-label {
+            display: inline-block;
+            width: 56px;
+            flex-shrink: 0;
+            font-size: 0.75em;
+            color: #90a4ae;
+            text-align: right;
+            padding-right: 8px;
+        }
+
+        .gap-value {
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 0.8em;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .gap-fast {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .gap-medium {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .gap-normal {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .gap-slow {
+            background: #f5f5f5;
+            color: #78909c;
+        }
+
+        .gap-null {
+            background: #fafafa;
+            color: #bdbdbd;
+        }
+
+        .gap-empty {
+            text-align: center;
+            padding: 40px;
+            color: #90a4ae;
+        }
     </style>
-  <script type="module" crossorigin src="/taiko-rating-app/assets/index-DZQjRx3i.js"></script>
+  <script type="module" crossorigin src="/taiko-rating-app/assets/index-BOIQUTkx.js"></script>
 </head>
 <body>
     <div class="header">
@@ -455,6 +587,17 @@
             <div class="error-modal-actions">
                 <button id="errorModalCloseBtn">我知道了</button>
             </div>
+        </div>
+    </div>
+
+    <div class="gap-modal hidden" id="gapModal">
+        <div class="gap-modal-content">
+            <div class="gap-modal-header">
+                <div class="gap-modal-title" id="gapModalTitle">音符间隔详情</div>
+                <button class="gap-modal-close" id="gapModalCloseBtn">&times;</button>
+            </div>
+            <div class="gap-modal-stats" id="gapModalStats"></div>
+            <div class="gap-modal-body" id="gapModalBody"></div>
         </div>
     </div>
 
