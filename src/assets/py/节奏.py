@@ -128,15 +128,6 @@ def calculate_rhythm_difficulty(arr, T):
                 else:
                     # 线性插值
                     return (value - lower_threshold) / (upper_threshold - lower_threshold)
-        
-            # def get_filling_coeff(value):
-            #     if value >= 100:
-            #         return 1.0
-            #     elif value <= 50:
-            #         return 0.0
-            #     else:
-            #         # 线性插值
-            #         return (value - 50) / 50
             
             c_coeff = get_filling_coeff(ai)
             
