@@ -966,7 +966,7 @@ function App() {
                           className={SORTABLE_COLS[columnId] ? 'sortable' : ''}
                         >
                           <span className="header-cell-text">
-                            {renderHeaderCell()}
+                            <span className="header-title-text">{renderHeaderCell()}</span>
                             {SORTABLE_COLS[columnId] ? <span className="sort-indicator">{sortIndicator(columnId)}</span> : null}
                           </span>
                         </DataGridHeaderCell>

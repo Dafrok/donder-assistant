@@ -301,7 +301,7 @@ body {
 }
 
 .table-grid {
-  min-width: 980px;
+  min-width: 1220px;
 }
 
 .table-grid .fui-DataGridHeader {
@@ -336,14 +336,20 @@ body {
   align-items: center;
   gap: 6px;
   max-width: 100%;
+  min-width: 0;
+}
+
+.header-title-text {
+  min-width: max-content;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .sort-indicator {
   color: #b6502f;
   font-size: 12px;
+  flex: 0 0 auto;
 }
 
 .result-row {
