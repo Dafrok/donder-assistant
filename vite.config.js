@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
@@ -20,6 +21,7 @@ export default defineConfig({
   root: 'src',
   publicDir: '../public',
   base: process.env.GITHUB_ACTIONS ? '/taiko-rating-app/' : '/',
+  plugins: [react()],
   resolve: {
     alias: {}
   },
