@@ -433,6 +433,7 @@ function App() {
   const [dragOver, setDragOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [hideTopBarTitle, setHideTopBarTitle] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [errorDialog, setErrorDialog] = useState({ open: false, title: '数据导入失败', message: '' });
   const [gapDialog, setGapDialog] = useState({
@@ -505,6 +506,19 @@ function App() {
     return () => {
       window.removeEventListener('resize', updateTopBarMode);
       if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
@@ -1033,16 +1047,6 @@ function App() {
           </div>
         </main>
 
-        <footer className="footer" ref={footerRef}>
-          <Body1>
-            部署时间: {footerInfo.timeStr} | 版本:
-            {' '}
-            <Link href={`https://github.com/Dafrok/taiko-rating-app/commit/${footerInfo.hash}`} target="_blank" rel="noreferrer">
-              {footerInfo.hash}
-            </Link>
-          </Body1>
-        </footer>
-
         <input ref={fileInputRef} type="file" multiple className="hidden-input" onChange={onUploadInputChange} />
 
         <Dialog open={errorDialog.open} onOpenChange={(_, data) => !data.open && hideErrorModal()}>
@@ -1098,7 +1102,7 @@ function App() {
         <Dialog open={aboutDialogOpen} onOpenChange={(_, data) => setAboutDialogOpen(data.open)}>
           <DialogSurface>
             <DialogBody>
-              <DialogTitle>关于本项目</DialogTitle>
+              <DialogTitle>关于太鼓铺面难度分析</DialogTitle>
               <DialogContent>
                 <Body1>
                   这是一个用于分析太鼓谱面难度的工具，支持导入 TJA 谱面文件，自动计算体力、复合、节奏、手速与爆发等维度评分。
@@ -1106,6 +1110,23 @@ function App() {
                 <Body1 style={{ marginTop: 8 }}>
                   你可以通过上传或拖拽文件夹批量导入谱面，使用顶部筛选与搜索快速定位歌曲，并将计算结果导出为 CSV。
                 </Body1>
+                <div className="about-meta" style={{ marginTop: 12 }}>
+                  <div className="about-meta-line">部署时间: {footerInfo.timeStr}</div>
+                  <div className="about-meta-line">
+                    版本:
+                    {' '}
+                    <Link href={`https://github.com/Dafrok/taiko-rating-app/commit/${footerInfo.hash}`} target="_blank" rel="noreferrer">
+                      {footerInfo.hash}
+                    </Link>
+                  </div>
+                  <div className="about-meta-line">
+                    网络状态:
+                    {' '}
+                    <span className={`network-status ${isOffline ? 'is-offline' : 'is-online'}`}>
+                      {isOffline ? '当前离线（缓存模式）' : '在线'}
+                    </span>
+                  </div>
+                </div>
               </DialogContent>
               <DialogActions>
                 <Button appearance="primary" onClick={() => setAboutDialogOpen(false)}>关闭</Button>

@@ -440,24 +440,28 @@ body {
   color: #4f7f94;
 }
 
-.footer {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 20;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 14px;
-  border-top: 1px solid #c2dcea;
-  background: linear-gradient(180deg, #f3f9fc 0%, #eaf3f8 100%);
-  backdrop-filter: blur(8px);
+.network-status {
+  font-weight: 600;
 }
 
-.footer a {
-  color: #1d8cbc;
+.network-status.is-online {
+  color: #1f7a35;
+}
+
+.network-status.is-offline {
+  color: #8a2d21;
+}
+
+.about-meta-line {
+  display: block;
+}
+
+.about-meta {
+  display: block;
+}
+
+.about-meta .about-meta-line + .about-meta-line {
+  margin-top: 6px;
 }
 
 .hidden-input {

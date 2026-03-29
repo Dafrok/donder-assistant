@@ -1,2 +1,209 @@
-/*! coi-serviceworker v0.1.7 - Guido Zuidhof and contributors, licensed under MIT */
-let coepCredentialless=!1;"undefined"==typeof window?(self.addEventListener("install",(()=>self.skipWaiting())),self.addEventListener("activate",(e=>e.waitUntil(self.clients.claim()))),self.addEventListener("message",(e=>{e.data&&("deregister"===e.data.type?self.registration.unregister().then((()=>self.clients.matchAll())).then((e=>{e.forEach((e=>e.navigate(e.url)))})):"coepCredentialless"===e.data.type&&(coepCredentialless=e.data.value))})),self.addEventListener("fetch",(function(e){const o=e.request;if("only-if-cached"===o.cache&&"same-origin"!==o.mode)return;const s=coepCredentialless&&"no-cors"===o.mode?new Request(o,{credentials:"omit"}):o;e.respondWith(fetch(s).then((e=>{if(0===e.status)return e;const o=new Headers(e.headers);return o.set("Cross-Origin-Embedder-Policy",coepCredentialless?"credentialless":"require-corp"),coepCredentialless||o.set("Cross-Origin-Resource-Policy","cross-origin"),o.set("Cross-Origin-Opener-Policy","same-origin"),new Response(e.body,{status:e.status,statusText:e.statusText,headers:o})})).catch((e=>console.error(e))))}))):(()=>{const e=window.sessionStorage.getItem("coiReloadedBySelf");window.sessionStorage.removeItem("coiReloadedBySelf");const o="coepdegrade"==e,s={shouldRegister:()=>!e,shouldDeregister:()=>!1,coepCredentialless:()=>!0,coepDegrade:()=>!0,doReload:()=>window.location.reload(),quiet:!1,...window.coi},r=navigator,t=r.serviceWorker&&r.serviceWorker.controller;t&&!window.crossOriginIsolated&&window.sessionStorage.setItem("coiCoepHasFailed","true");const i=window.sessionStorage.getItem("coiCoepHasFailed");if(t){const e=s.coepDegrade()&&!(o||window.crossOriginIsolated);r.serviceWorker.controller.postMessage({type:"coepCredentialless",value:!(e||i&&s.coepDegrade())&&s.coepCredentialless()}),e&&(!s.quiet&&console.log("Reloading page to degrade COEP."),window.sessionStorage.setItem("coiReloadedBySelf","coepdegrade"),s.doReload("coepdegrade")),s.shouldDeregister()&&r.serviceWorker.controller.postMessage({type:"deregister"})}!1===window.crossOriginIsolated&&s.shouldRegister()&&(window.isSecureContext?r.serviceWorker?r.serviceWorker.register(window.document.currentScript.src).then((e=>{!s.quiet&&console.log("COOP/COEP Service Worker registered",e.scope),e.addEventListener("updatefound",(()=>{!s.quiet&&console.log("Reloading page to make use of updated COOP/COEP Service Worker."),window.sessionStorage.setItem("coiReloadedBySelf","updatefound"),s.doReload()})),e.active&&!r.serviceWorker.controller&&(!s.quiet&&console.log("Reloading page to make use of COOP/COEP Service Worker."),window.sessionStorage.setItem("coiReloadedBySelf","notcontrolling"),s.doReload())}),(e=>{!s.quiet&&console.error("COOP/COEP Service Worker failed to register:",e)})):!s.quiet&&console.error("COOP/COEP Service Worker not registered, perhaps due to private mode."):!s.quiet&&console.log("COOP/COEP Service Worker not registered, a secure context is required."))})();
+/*
+  Combined COI + PWA service worker bootstrap.
+  - Worker context: COOP/COEP response headers + offline caching
+  - Window context: SW registration + update prompt
+*/
+
+(() => {
+  const SW_VERSION = '2026-03-30-2';
+  const APP_SHELL_CACHE = `app-shell-${SW_VERSION}`;
+  const RUNTIME_CACHE = `runtime-${SW_VERSION}`;
+  const PRECACHE_PATHS = ['./', './index.html', './offline.html', './manifest.webmanifest', './favicon.ico'];
+
+  function resolveScopeUrl(path) {
+    return new URL(path, self.registration.scope).toString();
+  }
+
+  function applyCrossOriginHeaders(response, coepCredentialless) {
+    if (!response || response.status === 0) return response;
+
+    const headers = new Headers(response.headers);
+    headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+    headers.set('Cross-Origin-Embedder-Policy', coepCredentialless ? 'credentialless' : 'require-corp');
+
+    if (!coepCredentialless) {
+      headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
+  }
+
+  // Worker-side implementation.
+  if (typeof window === 'undefined') {
+    let coepCredentialless = false;
+
+    self.addEventListener('install', (event) => {
+      event.waitUntil(
+        (async () => {
+          const cache = await caches.open(APP_SHELL_CACHE);
+          const urls = PRECACHE_PATHS.map((path) => resolveScopeUrl(path));
+          await cache.addAll(urls);
+        })()
+      );
+    });
+
+    self.addEventListener('activate', (event) => {
+      event.waitUntil(
+        (async () => {
+          const keys = await caches.keys();
+          await Promise.all(
+            keys
+              .filter((key) => key !== APP_SHELL_CACHE && key !== RUNTIME_CACHE)
+              .map((key) => caches.delete(key))
+          );
+          await self.clients.claim();
+        })()
+      );
+    });
+
+    self.addEventListener('message', (event) => {
+      const message = event.data || {};
+
+      if (message.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+      }
+
+      if (message.type === 'COEP_CREDENTIALLESS') {
+        coepCredentialless = !!message.value;
+      }
+    });
+
+    self.addEventListener('fetch', (event) => {
+      const request = event.request;
+
+      if (request.method !== 'GET') return;
+      if (request.cache === 'only-if-cached' && request.mode !== 'same-origin') return;
+
+      const requestUrl = new URL(request.url);
+      const isSameOrigin = requestUrl.origin === self.location.origin;
+      const isNavigation = request.mode === 'navigate';
+      const isPyResource = isSameOrigin && /\.py$/.test(requestUrl.pathname);
+      const isStaticAsset =
+        isSameOrigin &&
+        (/\/assets\//.test(requestUrl.pathname) ||
+          /\.(?:js|css|ico|png|jpg|jpeg|webp|svg|webmanifest|json|py)$/.test(requestUrl.pathname));
+
+      const proxiedRequest =
+        coepCredentialless && request.mode === 'no-cors'
+          ? new Request(request, { credentials: 'omit' })
+          : request;
+
+      event.respondWith(
+        (async () => {
+          // Navigation: network first, fallback to cached app shell.
+          if (isNavigation) {
+            try {
+              const networkResponse = await fetch(proxiedRequest);
+              const wrapped = applyCrossOriginHeaders(networkResponse, coepCredentialless);
+              const cache = await caches.open(APP_SHELL_CACHE);
+              cache.put(resolveScopeUrl('./index.html'), wrapped.clone());
+              return wrapped;
+            } catch (_) {
+              const cache = await caches.open(APP_SHELL_CACHE);
+              const fallback = await cache.match(resolveScopeUrl('./index.html'));
+              if (fallback) return fallback;
+              const offlineFallback = await cache.match(resolveScopeUrl('./offline.html'));
+              if (offlineFallback) return offlineFallback;
+              throw _;
+            }
+          }
+
+          // Python assets: network first, then runtime cache fallback.
+          if (isPyResource) {
+            const runtime = await caches.open(RUNTIME_CACHE);
+
+            try {
+              const networkResponse = await fetch(proxiedRequest);
+              const wrapped = applyCrossOriginHeaders(networkResponse, coepCredentialless);
+              runtime.put(request, wrapped.clone());
+              return wrapped;
+            } catch (_) {
+              const cached = await runtime.match(request);
+              if (cached) return cached;
+              throw _;
+            }
+          }
+
+          // Static resources: cache first.
+          if (isStaticAsset) {
+            const runtime = await caches.open(RUNTIME_CACHE);
+            const cached = await runtime.match(request);
+            if (cached) return cached;
+
+            const networkResponse = await fetch(proxiedRequest);
+            const wrapped = applyCrossOriginHeaders(networkResponse, coepCredentialless);
+            runtime.put(request, wrapped.clone());
+            return wrapped;
+          }
+
+          // Others: network first with runtime fallback.
+          try {
+            const networkResponse = await fetch(proxiedRequest);
+            return applyCrossOriginHeaders(networkResponse, coepCredentialless);
+          } catch (_) {
+            const runtime = await caches.open(RUNTIME_CACHE);
+            const cached = await runtime.match(request);
+            if (cached) return cached;
+            throw _;
+          }
+        })()
+      );
+    });
+
+    return;
+  }
+
+  // Window-side bootstrap.
+  if (!('serviceWorker' in navigator)) return;
+  if (!window.isSecureContext) return;
+
+  const currentScript = document.currentScript;
+  if (!currentScript || !currentScript.src) return;
+
+  let hasControllerRefresh = false;
+
+  navigator.serviceWorker
+    .register(currentScript.src)
+    .then((registration) => {
+      const promptForUpdate = (worker) => {
+        if (!worker) return;
+
+        const shouldUpdate = window.confirm('检测到新版本，是否立即更新？');
+        if (shouldUpdate) {
+          worker.postMessage({ type: 'SKIP_WAITING' });
+        }
+      };
+
+      if (registration.waiting) {
+        promptForUpdate(registration.waiting);
+      }
+
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        if (!newWorker) return;
+
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            promptForUpdate(newWorker);
+          }
+        });
+      });
+
+      if (registration.active && !navigator.serviceWorker.controller) {
+        window.location.reload();
+      }
+    })
+    .catch((error) => {
+      console.error('Service Worker 注册失败:', error);
+    });
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hasControllerRefresh) return;
+    hasControllerRefresh = true;
+    window.location.reload();
+  });
+})();
