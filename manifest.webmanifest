@@ -1,0 +1,19 @@
+{
+  "name": "Taiko Rating Calculator",
+  "short_name": "TaikoRating",
+  "description": "Taiko chart difficulty analyzer for TJA files.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fff8ef",
+  "theme_color": "#dc4a3a",
+  "icons": [
+    {
+      "src": "./favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    }
+  ]
+}
