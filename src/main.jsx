@@ -4,6 +4,7 @@ import { BrowserRouter, matchPath, useLocation, useNavigate } from 'react-router
 import {
   Breadcrumb,
   BreadcrumbButton,
+  BreadcrumbDivider,
   BreadcrumbItem,
   Body1,
   Button,
@@ -24,10 +25,12 @@ import {
   Hamburger,
   Input,
   Nav,
+  NavDivider,
   NavDrawer,
   NavDrawerBody,
   NavDrawerHeader,
   NavItem,
+  NavSectionHeader,
   Spinner,
   Toolbar,
   ToolbarButton,
@@ -39,8 +42,11 @@ import {
 import {
   ArrowDownloadRegular,
   ArrowUploadRegular,
+  CalculatorRegular,
+  DataHistogramRegular,
   FilterRegular,
   InfoRegular,
+  MoneyCalculatorRegular,
   SearchRegular,
   StarFilled,
   StarRegular
@@ -49,6 +55,8 @@ import { calculateDifficulty, warmupPython } from './data-engine.js';
 import { analyzeTjaToJson } from './tjs-analyzer.ts';
 import AboutPage from './AboutPage.jsx';
 import ChartDetailPage from './ChartDetailPage.jsx';
+import SingleSongPricePage from './SingleSongPricePage.jsx';
+import TargetScorePage from './TargetScorePage.jsx';
 import './styles.css';
 
 const DIFFICULTY_LABELS = {
@@ -726,10 +734,12 @@ function App() {
   }, [diffFilter]);
 
   const isAboutRoute = location.pathname === '/about';
+  const isSinglePriceRoute = location.pathname === '/single-price';
+  const isTargetScoreRoute = location.pathname === '/target-score';
   const isRootRoute = location.pathname === '/';
   const chartRouteMatch = matchPath('/chart/:chartId', location.pathname);
   const isChartRoute = Boolean(chartRouteMatch);
-  const isKnownRoute = isRootRoute || isAboutRoute || isChartRoute;
+  const isKnownRoute = isRootRoute || isAboutRoute || isSinglePriceRoute || isTargetScoreRoute || isChartRoute;
   const routeChartId = useMemo(() => {
     if (!chartRouteMatch?.params?.chartId) return '';
     try {
@@ -863,6 +873,10 @@ function App() {
 
   useEffect(() => {
     const updateTopBarMode = () => {
+      if (!isRootRoute) {
+        setHideTopBarTitle(false);
+        return;
+      }
       const topBarWidth = headerRef.current?.getBoundingClientRect().width || window.innerWidth;
       setHideTopBarTitle(topBarWidth < 640);
     };
@@ -880,7 +894,7 @@ function App() {
       window.removeEventListener('resize', updateTopBarMode);
       if (resizeObserver) resizeObserver.disconnect();
     };
-  }, []);
+  }, [isRootRoute]);
 
   useEffect(() => {
     let active = true;
@@ -1527,6 +1541,10 @@ function App() {
       navigate('/');
     } else if (data.value === 'about') {
       navigate('/about');
+    } else if (data.value === 'singlePrice') {
+      navigate('/single-price');
+    } else if (data.value === 'targetScore') {
+      navigate('/target-score');
     }
     setMenuOpen(false);
   }
@@ -1538,96 +1556,99 @@ function App() {
           <div className="top-bar-primary">
             <div className="top-bar-left">
               <Hamburger
-                className="header-hamburger"
+                className="topbar-hamburger"
                 aria-label="打开操作抽屉"
                 onClick={() => setMenuOpen((prev) => !prev)}
               />
-              {!hideTopBarTitle ? <Title3 className="top-bar-title">太鼓谱面难度分析</Title3> : null}
+              {!hideTopBarTitle ? <Title3 className="top-bar-title">Donder Tools</Title3> : null}
             </div>
-            <div className="actions-row">
-              <Input
-                className="search-input"
-                contentBefore={<SearchRegular />}
-                contentAfter={(
-                  <span className="search-filter-addon" ref={filterPanelRef}>
-                    <FilterButton
-                      className="search-filter-trigger"
-                      aria-label={filterPanelOpen ? '收起过滤器' : '展开过滤器'}
-                      aria-haspopup="menu"
-                      aria-expanded={filterPanelOpen}
-                      onClick={() => setFilterPanelOpen((prev) => !prev)}
-                    />
-                    {filterPanelOpen ? (
-                      <div className="filter-dropdown" role="menu" aria-label="难度过滤器">
-                        <div className="filter-label">难度过滤</div>
-                        <div className="filter-options" role="radiogroup" aria-label="按难度过滤">
-                          {DIFFICULTY_FILTER_OPTIONS.map((option) => {
-                            const selected = diffFilter === option.value;
-                            return (
-                              <Button
-                                key={option.value}
-                                className={`filter-option-btn${selected ? ' is-selected' : ''}`}
-                                appearance="subtle"
-                                size="medium"
-                                role="radio"
-                                aria-checked={selected}
-                                onClick={() => {
-                                  setDiffFilter(option.value);
-                                  setFilterPanelOpen(false);
-                                }}
-                              >
-                                {option.label}
-                              </Button>
-                            );
-                          })}
+            {isRootRoute ? (
+              <div className="actions-row">
+                <Input
+                  className="search-input"
+                  contentBefore={<SearchRegular />}
+                  contentAfter={(
+                    <span className="search-filter-addon" ref={filterPanelRef}>
+                      <FilterButton
+                        className="search-filter-trigger"
+                        aria-label={filterPanelOpen ? '收起过滤器' : '展开过滤器'}
+                        aria-haspopup="menu"
+                        aria-expanded={filterPanelOpen}
+                        onClick={() => setFilterPanelOpen((prev) => !prev)}
+                      />
+                      {filterPanelOpen ? (
+                        <div className="filter-dropdown" role="menu" aria-label="难度过滤器">
+                          <div className="filter-label">难度过滤</div>
+                          <div className="filter-options" role="radiogroup" aria-label="按难度过滤">
+                            {DIFFICULTY_FILTER_OPTIONS.map((option) => {
+                              const selected = diffFilter === option.value;
+                              return (
+                                <Button
+                                  key={option.value}
+                                  className={`filter-option-btn${selected ? ' is-selected' : ''}`}
+                                  appearance="subtle"
+                                  size="medium"
+                                  role="radio"
+                                  aria-checked={selected}
+                                  onClick={() => {
+                                    setDiffFilter(option.value);
+                                    setFilterPanelOpen(false);
+                                  }}
+                                >
+                                  {option.label}
+                                </Button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
-                  </span>
-                )}
-                placeholder="搜索歌曲..."
-                value={searchInput}
-                onChange={(_, data) => setSearchInput(data.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    commitSearch(event.currentTarget.value);
-                  }
-                }}
-              />
-            </div>
+                      ) : null}
+                    </span>
+                  )}
+                  placeholder="搜索歌曲..."
+                  value={searchInput}
+                  onChange={(_, data) => setSearchInput(data.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitSearch(event.currentTarget.value);
+                    }
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
         </header>
 
         <NavDrawer
-          className="app-nav-drawer"
           open={menuOpen}
           type="overlay"
           position="start"
           onOpenChange={(_, data) => setMenuOpen(data.open)}
         >
           <NavDrawerHeader
-            className="app-nav-drawer-header"
-            role="button"
-            tabIndex={0}
-            aria-label="收起操作抽屉"
-            onClick={() => setMenuOpen(false)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                setMenuOpen(false);
-              }
-            }}
+          className="app-nav-drawer-header"
           >
             <Hamburger
-              className="header-hamburger drawer-header-hamburger"
               aria-label="收起操作抽屉"
+              onClick={() => setMenuOpen(false)}
             />
           </NavDrawerHeader>
-          <NavDrawerBody>
-            <Nav onNavItemSelect={handleNavSelect} selectedValue={isAboutRoute ? 'about' : 'analysis'}>
-              <NavItem value="analysis" icon={<SearchRegular />}>谱面分析</NavItem>
-              <NavItem value="about" icon={<InfoRegular />}>帮助</NavItem>
+          <NavDrawerBody
+          >
+            <Nav
+              onNavItemSelect={handleNavSelect}
+              selectedValue={isAboutRoute ? 'about' : isTargetScoreRoute ? 'targetScore' : isSinglePriceRoute ? 'singlePrice' : 'analysis'}
+            >
+              <NavSectionHeader>数据分析</NavSectionHeader>
+              <NavItem value="analysis" icon={<DataHistogramRegular />}>谱面分析</NavItem>
+
+              <NavDivider />
+              <NavSectionHeader>出勤工具</NavSectionHeader>
+              <NavItem value="singlePrice" icon={<MoneyCalculatorRegular />}>单曲价格速算</NavItem>
+              <NavItem value="targetScore" icon={<CalculatorRegular />}>目标成绩速算</NavItem>
+
+              <NavDivider />
+              <NavItem value="about" icon={<InfoRegular />}>关于</NavItem>
             </Nav>
           </NavDrawerBody>
         </NavDrawer>
@@ -1654,6 +1675,10 @@ function App() {
           >
             <header className="list-caption" aria-label="谱面列表说明与操作">
               <Breadcrumb className="list-breadcrumb" aria-label="面包屑">
+                <BreadcrumbItem>
+                  <BreadcrumbButton>数据分析</BreadcrumbButton>
+                </BreadcrumbItem>
+                <BreadcrumbDivider />
                 <BreadcrumbItem>
                   <BreadcrumbButton current aria-current="page">谱面分析</BreadcrumbButton>
                 </BreadcrumbItem>
@@ -1743,6 +1768,8 @@ function App() {
           </div>
 
           {isAboutRoute ? <AboutPage footerInfo={footerInfo} isOffline={isOffline} onBack={() => navigate('/')} /> : null}
+          {isSinglePriceRoute ? <SingleSongPricePage onBack={() => navigate('/')} /> : null}
+          {isTargetScoreRoute ? <TargetScorePage onBack={() => navigate('/')} /> : null}
           {isChartRoute ? (
             <ChartDetailPage
               detail={selectedChartDetail}

@@ -3,9 +3,7 @@ import {
   Body1,
   Breadcrumb,
   BreadcrumbButton,
-  BreadcrumbDivider,
   BreadcrumbItem,
-  Button,
   Link
 } from '@fluentui/react-components';
 
@@ -13,18 +11,21 @@ function AboutPage({ footerInfo, isOffline, onBack }) {
   return (
     <div className="results-panel">
       <header className="list-caption" aria-label="关于页面导航">
-        <Breadcrumb className="list-breadcrumb" aria-label="帮助页面面包屑">
+        <Breadcrumb className="list-breadcrumb" aria-label="关于页面面包屑">
           <BreadcrumbItem>
-            <BreadcrumbButton current aria-current="page">帮助</BreadcrumbButton>
+            <BreadcrumbButton current aria-current="page">关于</BreadcrumbButton>
           </BreadcrumbItem>
         </Breadcrumb>
       </header>
       <div className="table-wrapper" style={{ padding: 16 }}>
         <Body1>
-          这是一个用于分析太鼓谱面难度的工具，支持导入 TJA 谱面文件，自动计算体力、复合、节奏、手速与爆发等维度评分。
+          Donder Tools 是一个面向太鼓谱面的分析与速算工具集合，支持导入 TJA 谱面并快速查看多维度结果。
         </Body1>
         <Body1 style={{ marginTop: 8 }}>
-          你可以通过上传或拖拽文件夹批量导入谱面，使用顶部筛选与搜索快速定位歌曲，并将计算结果导出为 CSV。
+          在“数据分析”中，你可以上传或拖拽文件夹批量导入谱面，使用搜索与筛选定位歌曲，并将分析结果导出为 CSV。
+        </Body1>
+        <Body1 style={{ marginTop: 8 }}>
+          在“出勤工具”中，你可以使用单曲价格速算与目标成绩速算，快速完成日常计算。
         </Body1>
         <div className="about-meta" style={{ marginTop: 12 }}>
           <div className="about-meta-line">部署时间: {footerInfo.timeStr}</div>
@@ -43,9 +44,6 @@ function AboutPage({ footerInfo, isOffline, onBack }) {
             </span>
           </div>
         </div>
-        <Button appearance="primary" style={{ marginTop: 16 }} onClick={onBack}>
-          返回列表
-        </Button>
       </div>
     </div>
   );

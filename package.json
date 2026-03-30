@@ -1,7 +1,7 @@
 {
   "name": "taiko-rating-calculator",
   "version": "2.0.0",
-  "description": "太鼓达人谱面难度计算器 - Web 版本",
+  "description": "Donder Tools - Web toolkit for Taiko chart analysis",
   "type": "module",
   "scripts": {
     "dev": "vite",

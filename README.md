@@ -1,4 +1,4 @@
-# 太鼓达人难度计算器 (Taiko Rating Calculator)
+# Donder Tools
 
 基于 Vite + Pyodide 的纯 Web 应用，在浏览器中实时计算太鼓达人谱面的体力、复合、节奏、爆发定数。
 
