@@ -720,6 +720,32 @@ function App() {
   }, [chartRouteMatch]);
 
   useEffect(() => {
+    const isTouchDevice = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
+    if (!isTouchDevice) return;
+
+    const preventGestureZoom = (event) => {
+      event.preventDefault();
+    };
+    const preventCtrlWheelZoom = (event) => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+      }
+    };
+
+    document.addEventListener('gesturestart', preventGestureZoom, { passive: false });
+    document.addEventListener('gesturechange', preventGestureZoom, { passive: false });
+    document.addEventListener('gestureend', preventGestureZoom, { passive: false });
+    window.addEventListener('wheel', preventCtrlWheelZoom, { passive: false });
+
+    return () => {
+      document.removeEventListener('gesturestart', preventGestureZoom);
+      document.removeEventListener('gesturechange', preventGestureZoom);
+      document.removeEventListener('gestureend', preventGestureZoom);
+      window.removeEventListener('wheel', preventCtrlWheelZoom);
+    };
+  }, []);
+
+  useEffect(() => {
     if (fileInputRef.current) {
       fileInputRef.current.setAttribute('webkitdirectory', '');
       fileInputRef.current.setAttribute('directory', '');
@@ -789,7 +815,9 @@ function App() {
 
     const updateLayoutVars = () => {
       const headerHeight = headerRef.current?.getBoundingClientRect().height || 0;
-      const footerHeight = footerRef.current?.getBoundingClientRect().height || 0;
+      const footerHeight = isRootRoute
+        ? (footerRef.current?.getBoundingClientRect().height || 0)
+        : 0;
       rootStyle.setProperty('--header-height', `${Math.ceil(headerHeight)}px`);
       rootStyle.setProperty('--footer-height', `${Math.ceil(footerHeight)}px`);
     };
@@ -800,7 +828,7 @@ function App() {
     if ('ResizeObserver' in window) {
       resizeObserver = new ResizeObserver(updateLayoutVars);
       if (headerRef.current) resizeObserver.observe(headerRef.current);
-      if (footerRef.current) resizeObserver.observe(footerRef.current);
+      if (isRootRoute && footerRef.current) resizeObserver.observe(footerRef.current);
     }
 
     window.addEventListener('resize', updateLayoutVars);
@@ -808,7 +836,7 @@ function App() {
       window.removeEventListener('resize', updateLayoutVars);
       if (resizeObserver) resizeObserver.disconnect();
     };
-  }, []);
+  }, [isRootRoute]);
 
   useEffect(() => {
     const updateTopBarMode = () => {
