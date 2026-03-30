@@ -39,7 +39,7 @@ function AboutPage({ footerInfo, isOffline, onBack }) {
             网络状态:
             {' '}
             <span className={`network-status ${isOffline ? 'is-offline' : 'is-online'}`}>
-              {isOffline ? '当前离线（缓存模式）' : '在线'}
+              {isOffline ? '网络不可达' : '网络可达'}
             </span>
           </div>
         </div>

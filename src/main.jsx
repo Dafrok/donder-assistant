@@ -104,6 +104,11 @@ const TAIKO_KA_PALETTE = {
   160: '#fff8f2'
 };
 
+const NETWORK_PROBE_URLS = [
+  'https://www.gstatic.com/generate_204',
+  'https://github.com/favicon.ico'
+];
+
 const taikoKaTheme = {
   ...webLightTheme,
   ...createLightTheme(TAIKO_KA_PALETTE)
@@ -143,6 +148,29 @@ function getBranchColor(branchType) {
     master: '#b42318'
   };
   return colors[branchType] || '#667085';
+}
+
+async function probeNetworkReachability(signal) {
+  for (const baseUrl of NETWORK_PROBE_URLS) {
+    const probeUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}ts=${Date.now()}`;
+
+    try {
+      await fetch(probeUrl, {
+        method: 'GET',
+        mode: 'no-cors',
+        cache: 'no-store',
+        redirect: 'follow',
+        signal
+      });
+      return true;
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+    }
+  }
+
+  return false;
 }
 
 function isValidSongJson(songData) {
@@ -567,15 +595,56 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
+    let active = true;
+    let currentController = null;
+
+    const checkNetworkStatus = async () => {
+      const controller = new AbortController();
+      currentController?.abort();
+      currentController = controller;
+
+      if (!navigator.onLine) {
+        if (active && currentController === controller) {
+          setIsOffline(true);
+        }
+        return;
+      }
+
+      try {
+        const reachable = await probeNetworkReachability(controller.signal);
+        if (active && currentController === controller) {
+          setIsOffline(!reachable);
+        }
+      } catch (error) {
+        if (!active || controller.signal.aborted) return;
+        if (currentController === controller) {
+          setIsOffline(true);
+        }
+      }
+    };
+
+    const handleOnline = () => {
+      void checkNetworkStatus();
+    };
     const handleOffline = () => setIsOffline(true);
+
+    void checkNetworkStatus();
+
+    const intervalId = window.setInterval(() => {
+      void checkNetworkStatus();
+    }, 30000);
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('focus', handleOnline);
 
     return () => {
+      active = false;
+      currentController?.abort();
+      window.clearInterval(intervalId);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('focus', handleOnline);
     };
   }, []);
 
