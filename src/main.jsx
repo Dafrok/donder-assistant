@@ -109,6 +109,8 @@ const NETWORK_PROBE_URLS = [
   'https://github.com/favicon.ico'
 ];
 
+const ROUTER_BASENAME = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '/';
+
 const taikoKaTheme = {
   ...webLightTheme,
   ...createLightTheme(TAIKO_KA_PALETTE)
@@ -1340,7 +1342,7 @@ function App() {
 }
 
 createRoot(document.getElementById('root')).render(
-  <BrowserRouter>
+  <BrowserRouter basename={ROUTER_BASENAME}>
     <App />
   </BrowserRouter>
 );
