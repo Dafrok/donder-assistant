@@ -1,11 +1,13 @@
 import React from 'react';
 import {
   Body1,
+  Button,
   Breadcrumb,
   BreadcrumbButton,
   BreadcrumbDivider,
   BreadcrumbItem
 } from '@fluentui/react-components';
+import { StarFilled, StarRegular } from '@fluentui/react-icons';
 
 function getDifficultyColor(difficulty) {
   const colors = {
@@ -44,7 +46,7 @@ function formatGapThreshold(value) {
   return Number(value).toFixed(1);
 }
 
-function ChartDetailPage({ detail, onBack }) {
+function ChartDetailPage({ detail, onBack, isFavorite = false, onToggleFavorite }) {
   const statItems = detail?.stats ? [
     { label: '音符总数', value: detail.stats.totalNotes },
     { label: '平均间隔', value: `${detail.stats.avgGap} ms` },
@@ -98,7 +100,18 @@ function ChartDetailPage({ detail, onBack }) {
           <div className="chart-detail-grid">
             <div className="chart-detail-left-column">
               <section className="chart-detail-card chart-detail-stats-card" aria-label="概览">
-                <h3 className="chart-detail-card-title">概览</h3>
+                <div className="chart-detail-card-title-row">
+                  <h3 className="chart-detail-card-title">概览</h3>
+                  <Button
+                    className="chart-detail-favorite-button"
+                    appearance="transparent"
+                    size="small"
+                    icon={isFavorite ? <StarFilled color="#f5b301" /> : <StarRegular color="#f5b301" />}
+                    aria-label={isFavorite ? '取消收藏谱面' : '收藏谱面'}
+                    disabled={!onToggleFavorite}
+                    onClick={onToggleFavorite}
+                  />
+                </div>
 
                 {(detail?.diffLabel || detail?.branchLabel || detail?.stats) ? (
                   <div className="chart-detail-stats-grid">

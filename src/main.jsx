@@ -41,7 +41,9 @@ import {
   ArrowUploadRegular,
   FilterRegular,
   InfoRegular,
-  SearchRegular
+  SearchRegular,
+  StarFilled,
+  StarRegular
 } from '@fluentui/react-icons';
 import { calculateDifficulty, warmupPython } from './data-engine.js';
 import { analyzeTjaToJson } from './tjs-analyzer.ts';
@@ -110,6 +112,104 @@ const NETWORK_PROBE_URLS = [
 ];
 
 const ROUTER_BASENAME = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '/';
+const FAVORITE_IDS_STORAGE_KEY = 'taiko-rating.favorite-chart-ids.v1';
+const FAVORITE_SONGS_CACHE_FLAG_KEY = 'taiko-rating.favorite-songs-cache-flag.v1';
+const FAVORITE_SONGS_DB_NAME = 'taiko-rating-cache';
+const FAVORITE_SONGS_DB_STORE = 'kv';
+const FAVORITE_SONGS_DB_KEY = 'favorite-songs';
+
+function loadStoredJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function saveStoredJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`⚠️ 持久化失败: ${key}`, error);
+  }
+}
+
+function openFavoriteCacheDb() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('当前环境不支持 IndexedDB'));
+      return;
+    }
+
+    const request = indexedDB.open(FAVORITE_SONGS_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(FAVORITE_SONGS_DB_STORE)) {
+        db.createObjectStore(FAVORITE_SONGS_DB_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('打开缓存数据库失败'));
+  });
+}
+
+async function readFavoriteSongsFromDb() {
+  const db = await openFavoriteCacheDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FAVORITE_SONGS_DB_STORE, 'readonly');
+    const store = tx.objectStore(FAVORITE_SONGS_DB_STORE);
+    const request = store.get(FAVORITE_SONGS_DB_KEY);
+    request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result : []);
+    request.onerror = () => reject(request.error || new Error('读取收藏缓存失败'));
+    tx.oncomplete = () => db.close();
+    tx.onabort = () => db.close();
+    tx.onerror = () => db.close();
+  });
+}
+
+async function writeFavoriteSongsToDb(songs) {
+  const db = await openFavoriteCacheDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FAVORITE_SONGS_DB_STORE, 'readwrite');
+    const store = tx.objectStore(FAVORITE_SONGS_DB_STORE);
+    store.put(songs, FAVORITE_SONGS_DB_KEY);
+    tx.oncomplete = () => {
+      db.close();
+      resolve(true);
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error || new Error('写入收藏缓存失败'));
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error || new Error('写入收藏缓存被中止'));
+    };
+  });
+}
+
+async function clearFavoriteSongsDb() {
+  const db = await openFavoriteCacheDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FAVORITE_SONGS_DB_STORE, 'readwrite');
+    const store = tx.objectStore(FAVORITE_SONGS_DB_STORE);
+    store.delete(FAVORITE_SONGS_DB_KEY);
+    tx.oncomplete = () => {
+      db.close();
+      resolve(true);
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error || new Error('清理收藏缓存失败'));
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error || new Error('清理收藏缓存被中止'));
+    };
+  });
+}
 
 const taikoKaTheme = {
   ...webLightTheme,
@@ -587,6 +687,14 @@ function App() {
   const [hideTopBarTitle, setHideTopBarTitle] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [errorDialog, setErrorDialog] = useState({ open: false, title: '数据导入失败', message: '' });
+  const [hasFavoriteCache, setHasFavoriteCache] = useState(() => {
+    return localStorage.getItem(FAVORITE_SONGS_CACHE_FLAG_KEY) === '1';
+  });
+  const [favoriteChartIds, setFavoriteChartIds] = useState(() => {
+    const ids = loadStoredJson(FAVORITE_IDS_STORAGE_KEY, []);
+    if (!Array.isArray(ids)) return new Set();
+    return new Set(ids.filter((id) => typeof id === 'string' && id));
+  });
   const routeSearchKeyword = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return params.get('q') ?? '';
@@ -629,6 +737,52 @@ function App() {
       setTimeout(warmup, 300);
     }
   }, []);
+
+  async function restoreFavoriteSongsFromCache(sourceLabel = '本地收藏缓存', showErrorWhenEmpty = false) {
+    let cachedSongs = [];
+    try {
+      cachedSongs = await readFavoriteSongsFromDb();
+    } catch (error) {
+      console.warn('⚠️ 读取收藏缓存失败:', error);
+      cachedSongs = [];
+    }
+
+    if (!Array.isArray(cachedSongs) || cachedSongs.length === 0) {
+      setHasFavoriteCache(false);
+      localStorage.removeItem(FAVORITE_SONGS_CACHE_FLAG_KEY);
+      if (showErrorWhenEmpty) {
+        showErrorModal('尚未收藏任何谱面，请先在列表中点击星标收藏。', '没有收藏缓存');
+      }
+      return false;
+    }
+
+    const restoredSongs = cachedSongs
+      .map((song) => {
+        if (!song || typeof song !== 'object' || !song.data) return null;
+        return {
+          category: song.category || '未知分类',
+          songName: song.songName || '未知歌曲',
+          data: normalizeSongJson(song.data),
+          songHash: song.songHash || ''
+        };
+      })
+      .filter(Boolean);
+
+    if (!restoredSongs.length) {
+      setHasFavoriteCache(false);
+      localStorage.removeItem(FAVORITE_SONGS_CACHE_FLAG_KEY);
+      if (showErrorWhenEmpty) {
+        showErrorModal('收藏缓存数据无效，请重新收藏后再试。', '收藏缓存无效');
+      }
+      return false;
+    }
+
+    setHasFavoriteCache(true);
+    localStorage.setItem(FAVORITE_SONGS_CACHE_FLAG_KEY, '1');
+    setAllSongsData(restoredSongs);
+    await runCalculation(restoredSongs, sourceLabel);
+    return true;
+  }
 
   useEffect(() => {
     const rootStyle = document.documentElement.style;
@@ -778,16 +932,30 @@ function App() {
     };
   }, []);
 
+  const chartIdsBySongIndex = useMemo(() => {
+    const grouped = new Map();
+    for (const row of currentRows) {
+      if (!grouped.has(row.songIndex)) {
+        grouped.set(row.songIndex, []);
+      }
+      grouped.get(row.songIndex).push(row.id);
+    }
+    return grouped;
+  }, [currentRows]);
+
+  const columnSizingOptions = useMemo(() => ({
+    songName: {
+      minWidth: 220,
+      idealWidth: 220,
+      defaultWidth: 220
+    }
+  }), []);
+
   const gridColumns = useMemo(() => ([
     createTableColumn({
       columnId: 'songName',
       renderHeaderCell: () => '歌曲名',
       renderCell: (item) => item.songName
-    }),
-    createTableColumn({
-      columnId: 'category',
-      renderHeaderCell: () => '分类',
-      renderCell: (item) => item.category
     }),
     createTableColumn({
       columnId: 'difficulty',
@@ -804,9 +972,12 @@ function App() {
     }),
     createTableColumn({
       columnId: 'branchType',
-      renderHeaderCell: () => '分支',
+      renderHeaderCell: () => '分歧',
       renderCell: (item) => {
         const branchLabel = BRANCH_LABELS[item.branchType] || '';
+        if (!branchLabel) {
+          return <span style={{ color: '#c4cbd4', fontWeight: 400, opacity: 0.78 }}>无</span>;
+        }
         return <span style={{ color: getBranchColor(item.branchType), fontWeight: 600 }}>{branchLabel}</span>;
       }
     }),
@@ -844,8 +1015,28 @@ function App() {
       columnId: 'burst',
       renderHeaderCell: () => '爆发',
       renderCell: (item) => formatNumber(item.ratings.burst)
+    }),
+    createTableColumn({
+      columnId: 'favorite',
+      renderHeaderCell: () => '收藏',
+      renderCell: (item) => {
+        const relatedChartIds = chartIdsBySongIndex.get(item.songIndex) || [item.id];
+        const isFavorite = relatedChartIds.every((chartId) => favoriteChartIds.has(chartId));
+        return (
+          <Button
+            appearance="transparent"
+            size="small"
+            icon={isFavorite ? <StarFilled color="#f5b301" /> : <StarRegular color="#f5b301" />}
+            aria-label={isFavorite ? '取消收藏谱面' : '收藏谱面'}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleFavoriteChart(item);
+            }}
+          />
+        );
+      }
     })
-  ]), []);
+  ]), [favoriteChartIds, chartIdsBySongIndex]);
 
   const filteredRows = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
@@ -903,6 +1094,12 @@ function App() {
     };
   }, [allSongsData, selectedChartRow]);
 
+  const selectedChartIsFavorite = useMemo(() => {
+    if (!selectedChartRow) return false;
+    const relatedChartIds = chartIdsBySongIndex.get(selectedChartRow.songIndex) || [selectedChartRow.id];
+    return relatedChartIds.length > 0 && relatedChartIds.every((chartId) => favoriteChartIds.has(chartId));
+  }, [selectedChartRow, chartIdsBySongIndex, favoriteChartIds]);
+
   useEffect(() => {
     if (isChartRoute && !selectedChartDetail) {
       navigate({ pathname: '/', search: location.search });
@@ -945,6 +1142,99 @@ function App() {
     if (location.pathname !== '/') {
       navigate({ pathname: '/', search: location.search });
     }
+  }
+
+  async function persistFavoriteSongs(idsSet) {
+    let existingSongs = [];
+    try {
+      const stored = await readFavoriteSongsFromDb();
+      existingSongs = Array.isArray(stored) ? stored : [];
+    } catch (error) {
+      console.warn('⚠️ 读取已有收藏缓存失败:', error);
+      existingSongs = [];
+    }
+
+    const favoriteSongIndexes = new Set(
+      currentRows
+        .filter((row) => idsSet.has(row.id))
+        .map((row) => row.songIndex)
+    );
+
+    const selectedSongs = Array.from(favoriteSongIndexes)
+      .sort((a, b) => a - b)
+      .map((songIndex) => allSongsData[songIndex])
+      .filter(Boolean)
+      .map((song) => ({
+        category: song.category,
+        songName: song.songName,
+        data: song.data,
+        songHash: song.songHash
+      }));
+
+    const selectedSongHashSet = new Set(selectedSongs.map((song) => song.songHash).filter(Boolean));
+    const currentDatasetSongHashSet = new Set(
+      allSongsData
+        .map((song) => song?.songHash)
+        .filter((songHash) => typeof songHash === 'string' && songHash)
+    );
+
+    // Keep favorites from other imports; replace only songs from the current dataset.
+    const retainedExistingSongs = existingSongs.filter((song) => {
+      const songHash = song?.songHash;
+      if (typeof songHash !== 'string' || !songHash) return false;
+      if (!currentDatasetSongHashSet.has(songHash)) return true;
+      return selectedSongHashSet.has(songHash);
+    });
+
+    const mergedByHash = new Map();
+    for (const song of retainedExistingSongs) {
+      if (song?.songHash) mergedByHash.set(song.songHash, song);
+    }
+    for (const song of selectedSongs) {
+      if (song?.songHash) mergedByHash.set(song.songHash, song);
+    }
+    const cachedSongs = Array.from(mergedByHash.values());
+
+    if (cachedSongs.length === 0) {
+      try {
+        await clearFavoriteSongsDb();
+      } catch (error) {
+        console.warn('⚠️ 清理收藏缓存失败:', error);
+      }
+      localStorage.removeItem(FAVORITE_SONGS_CACHE_FLAG_KEY);
+      setHasFavoriteCache(false);
+      return;
+    }
+
+    try {
+      await writeFavoriteSongsToDb(cachedSongs);
+      localStorage.setItem(FAVORITE_SONGS_CACHE_FLAG_KEY, '1');
+    } catch (error) {
+      console.warn('⚠️ 写入收藏缓存失败:', error);
+    }
+    setHasFavoriteCache(cachedSongs.length > 0);
+  }
+
+  function toggleFavoriteChart(row) {
+    setFavoriteChartIds((prev) => {
+      const next = new Set(prev);
+      const relatedChartIds = chartIdsBySongIndex.get(row.songIndex) || [row.id];
+      const isAllFavorited = relatedChartIds.every((chartId) => next.has(chartId));
+
+      if (isAllFavorited) {
+        for (const chartId of relatedChartIds) {
+          next.delete(chartId);
+        }
+      } else {
+        for (const chartId of relatedChartIds) {
+          next.add(chartId);
+        }
+      }
+
+      saveStoredJson(FAVORITE_IDS_STORAGE_KEY, Array.from(next));
+      void persistFavoriteSongs(next);
+      return next;
+    });
   }
 
   function findGapData(songIndex, difficulty, branchType) {
@@ -1318,6 +1608,16 @@ function App() {
                 </BreadcrumbItem>
               </Breadcrumb>
               <Toolbar className="list-toolbar" aria-label="谱面列表工具栏">
+                <ToolbarButton
+                  className="list-toolbar-button"
+                  appearance="subtle"
+                  size="small"
+                  icon={<StarRegular />}
+                  disabled={!hasFavoriteCache}
+                  onClick={() => void restoreFavoriteSongsFromCache('手动加载收藏夹', true)}
+                >
+                  加载收藏
+                </ToolbarButton>
                 <ToolbarButton className="list-toolbar-button" appearance="subtle" size="small" icon={<ArrowUploadRegular />} onClick={() => fileInputRef.current?.click()}>
                   上传谱面
                 </ToolbarButton>
@@ -1338,6 +1638,7 @@ function App() {
                   className="table-grid"
                   items={filteredRows}
                   columns={gridColumns}
+                  columnSizingOptions={columnSizingOptions}
                   getRowId={(item) => item.id}
                   focusMode="composite"
                 >
@@ -1347,6 +1648,14 @@ function App() {
                         <DataGridHeaderCell
                           onClick={() => onSort(columnId)}
                           className={`${SORTABLE_COLS[columnId] ? 'sortable' : ''} ${columnId === 'songName' ? 'sticky-first-col-header' : ''}`.trim()}
+                          style={columnId === 'songName'
+                            ? {
+                              width: 'var(--song-col-width)',
+                              minWidth: 'var(--song-col-width)',
+                              maxWidth: 'var(--song-col-width)',
+                              flexBasis: 'var(--song-col-width)'
+                            }
+                            : undefined}
                         >
                           <span className="header-cell-text">
                             <span className="header-title-text">{renderHeaderCell()}</span>
@@ -1360,7 +1669,17 @@ function App() {
                     {({ item, rowId }) => (
                       <DataGridRow key={rowId} className="result-row" onClick={() => openChartDetailPage(item)}>
                         {({ renderCell, columnId }) => (
-                          <DataGridCell className={columnId === 'songName' ? 'sticky-first-col-cell' : ''}>
+                          <DataGridCell
+                            className={columnId === 'songName' ? 'sticky-first-col-cell' : ''}
+                            style={columnId === 'songName'
+                              ? {
+                                width: 'var(--song-col-width)',
+                                minWidth: 'var(--song-col-width)',
+                                maxWidth: 'var(--song-col-width)',
+                                flexBasis: 'var(--song-col-width)'
+                              }
+                              : undefined}
+                          >
                             {renderCell(item)}
                           </DataGridCell>
                         )}
@@ -1373,7 +1692,14 @@ function App() {
           </div>
 
           {isAboutRoute ? <AboutPage footerInfo={footerInfo} isOffline={isOffline} onBack={() => navigate('/')} /> : null}
-          {isChartRoute ? <ChartDetailPage detail={selectedChartDetail} onBack={closeChartDetailPage} /> : null}
+          {isChartRoute ? (
+            <ChartDetailPage
+              detail={selectedChartDetail}
+              onBack={closeChartDetailPage}
+              isFavorite={selectedChartIsFavorite}
+              onToggleFavorite={selectedChartRow ? () => toggleFavoriteChart(selectedChartRow) : undefined}
+            />
+          ) : null}
         </main>
 
         {isRootRoute ? (
