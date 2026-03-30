@@ -1,6 +1,6 @@
 {
-  "name": "Taiko Rating Calculator",
-  "short_name": "TaikoRating",
+  "name": "Donder Tools",
+  "short_name": "DonderTools",
   "description": "Taiko chart difficulty analyzer for TJA files.",
   "id": "./",
   "start_url": "./",
