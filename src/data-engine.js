@@ -1,9 +1,7 @@
 /**
  * 计算引擎 - 使用 Pyodide 在浏览器中运行 Python
- * Pyodide 从 npm 包加载，Python 模块从 assets 载入
+ * Pyodide 直接从 CDN 加载，Python 模块从 assets 载入
  */
-
-import { loadPyodide } from 'pyodide'
 
 // 导入 Python 模块 URL（Vite 会为这些文件添加 hash）
 import py体力Url from './assets/py/体力.py?url'
@@ -24,7 +22,7 @@ function yieldToMain() {
 }
 
 /**
- * 初始化 Pyodide
+ * 初始化 Pyodide - 从 CDN 加载
  */
 export async function initPyodide() {
   if (pyodideReady && pyodide) return pyodide;
@@ -35,7 +33,12 @@ export async function initPyodide() {
       console.log('🐍 初始化 Pyodide...');
 
       await yieldToMain();
-      pyodide = await loadPyodide();
+      const { loadPyodide } = await import('https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.mjs');
+
+      await yieldToMain();
+      pyodide = await loadPyodide({
+        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/'
+      });
 
       console.log('✅ Pyodide 初始化完成');
       pyodideReady = true;
