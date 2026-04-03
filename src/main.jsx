@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, matchPath, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -55,6 +55,7 @@ import { calculateDifficulty, warmupPython } from './data-engine.js';
 import { analyzeTjaToJson } from './tjs-analyzer.ts';
 import AboutPage from './AboutPage.jsx';
 import ChartDetailPage from './ChartDetailPage.jsx';
+import ConstantsDetailPage from './ConstantsDetailPage.jsx';
 import ConstantsTablePage from './ConstantsTablePage.jsx';
 import SingleSongPricePage from './SingleSongPricePage.jsx';
 import TargetScorePage from './TargetScorePage.jsx';
@@ -738,6 +739,8 @@ function App() {
 
   const isAboutRoute = location.pathname === '/about';
   const isConstantsRoute = location.pathname === '/constants';
+  const constantsDetailRouteMatch = matchPath('/constants/:entryId', location.pathname);
+  const isConstantsDetailRoute = Boolean(constantsDetailRouteMatch);
   const isSinglePriceRoute = location.pathname === '/single-price';
   const isTargetScoreRoute = location.pathname === '/target-score';
   const isRootRoute = location.pathname === '/';
@@ -745,7 +748,7 @@ function App() {
   const chartDetailRouteMatch = matchPath('/chart/:chartId', location.pathname);
   const chartRouteMatch = chartPreviewRouteMatch || chartDetailRouteMatch;
   const isChartRoute = Boolean(chartRouteMatch);
-  const isKnownRoute = isRootRoute || isConstantsRoute || isAboutRoute || isSinglePriceRoute || isTargetScoreRoute || isChartRoute;
+  const isKnownRoute = isRootRoute || isConstantsRoute || isConstantsDetailRoute || isAboutRoute || isSinglePriceRoute || isTargetScoreRoute || isChartRoute;
   const routeChartId = useMemo(() => {
     if (!chartRouteMatch?.params?.chartId) return '';
     try {
@@ -754,6 +757,14 @@ function App() {
       return chartRouteMatch.params.chartId;
     }
   }, [chartRouteMatch]);
+
+  const routeConstantsDetail = useMemo(() => {
+    const stateDetail = location.state?.constantDetail;
+    if (stateDetail && typeof stateDetail === 'object') {
+      return stateDetail;
+    }
+    return null;
+  }, [location.state]);
 
   useEffect(() => {
     const isTouchDevice = navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
@@ -1606,6 +1617,16 @@ function App() {
     setMenuOpen(false);
   }
 
+  const openConstantsDetail = useCallback((detail) => {
+    if (!detail?.id) return;
+    navigate({
+      pathname: `/constants/${encodeURIComponent(detail.id)}`,
+      search: location.search
+    }, {
+      state: { constantDetail: detail }
+    });
+  }, [navigate, location.search]);
+
   return (
     <FluentProvider theme={taikoKaTheme}>
       <div className="app-shell">
@@ -1622,6 +1643,7 @@ function App() {
             {(isRootRoute || isConstantsRoute) ? (
               <div className="actions-row">
                 <Input
+                  key={isConstantsRoute ? `constants-${routeSearchKeyword}` : 'analysis-search'}
                   className="search-input"
                   contentBefore={<SearchRegular />}
                   contentAfter={isConstantsRoute ? undefined : (
@@ -1662,8 +1684,13 @@ function App() {
                     </span>
                   )}
                   placeholder={isConstantsRoute ? '搜索定数表...' : '搜索歌曲...'}
-                  value={searchInput}
-                  onChange={(_, data) => setSearchInput(data.value)}
+                  value={isConstantsRoute ? undefined : searchInput}
+                  defaultValue={isConstantsRoute ? routeSearchKeyword : undefined}
+                  onChange={(_, data) => {
+                    if (!isConstantsRoute) {
+                      setSearchInput(data.value);
+                    }
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                       event.preventDefault();
@@ -1694,7 +1721,7 @@ function App() {
           >
             <Nav
               onNavItemSelect={handleNavSelect}
-              selectedValue={isAboutRoute ? 'about' : isTargetScoreRoute ? 'targetScore' : isSinglePriceRoute ? 'singlePrice' : isConstantsRoute ? 'constants' : 'analysis'}
+              selectedValue={isAboutRoute ? 'about' : isTargetScoreRoute ? 'targetScore' : isSinglePriceRoute ? 'singlePrice' : (isConstantsRoute || isConstantsDetailRoute) ? 'constants' : 'analysis'}
             >
               <NavSectionHeader>数据分析</NavSectionHeader>
               <NavItem value="constants" icon={<DataHistogramRegular />}>定数表</NavItem>
@@ -1830,9 +1857,16 @@ function App() {
             <ConstantsTablePage
               searchKeyword={searchKeyword}
               onCountChange={setConstantsVisibleCount}
+              onOpenDetail={openConstantsDetail}
               isActive={isConstantsRoute}
             />
           </div>
+          {isConstantsDetailRoute ? (
+            <ConstantsDetailPage
+              detail={routeConstantsDetail}
+              onBack={() => navigate({ pathname: '/constants', search: location.search })}
+            />
+          ) : null}
           {isSinglePriceRoute ? <SingleSongPricePage onBack={() => navigate('/')} /> : null}
           {isTargetScoreRoute ? <TargetScorePage onBack={() => navigate('/')} /> : null}
           {isChartRoute ? (

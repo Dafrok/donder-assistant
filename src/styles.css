@@ -574,6 +574,7 @@ body {
 .constants-table-wrapper {
   flex: 1 1 auto;
   background: #ffffff;
+  position: relative;
 }
 
 .constants-loading-wrap {
@@ -584,6 +585,18 @@ body {
   color: #87503a;
 }
 
+.constants-list-busy-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 247, 240, 0.62);
+  backdrop-filter: blur(1px);
+  pointer-events: auto;
+}
+
 .constants-grid {
   min-width: 1220px;
   --song-col-width: 220px;
@@ -591,6 +604,192 @@ body {
 
 .constants-row:hover {
   background-color: #e8f3f9;
+}
+
+.constants-row {
+  cursor: pointer;
+}
+
+.constants-detail-panel {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 88% 14%, rgba(255, 189, 139, 0.24) 0%, rgba(255, 189, 139, 0) 40%),
+    radial-gradient(circle at 12% 92%, rgba(122, 203, 233, 0.2) 0%, rgba(122, 203, 233, 0) 46%),
+    linear-gradient(180deg, #f5fbff 0%, #eef7fd 100%);
+}
+
+.constants-detail-body {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.constants-detail-left-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.constants-detail-info-card,
+.constants-detail-radar-card,
+.constants-detail-score-list,
+.constants-detail-empty {
+  border-radius: 14px;
+  border: 1px solid #d9e9f5;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(251, 253, 255, 0.96) 100%);
+  box-shadow: 0 10px 28px rgba(66, 119, 146, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.constants-detail-info-card {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.constants-detail-title {
+  margin: 0 0 2px;
+  color: #8a3d20;
+}
+
+.constants-detail-meta {
+  margin: 0;
+  color: #4d6172;
+}
+
+.constants-detail-radar-card {
+  padding: 14px;
+  min-width: 0;
+}
+
+.constants-detail-card-title {
+  margin: 0 0 10px;
+  color: #8a3d20;
+  font-size: 15px;
+}
+
+.constants-radar-svg {
+  width: 100%;
+  max-width: 560px;
+  display: block;
+  margin: 0 auto;
+}
+
+.constants-radar-grid {
+  fill: rgba(255, 167, 112, 0.05);
+  stroke: #d5e5f4;
+  stroke-width: 1;
+}
+
+.constants-radar-axis {
+  stroke: #c9dcee;
+  stroke-width: 1;
+}
+
+.constants-radar-value {
+  fill: rgba(228, 86, 55, 0.28);
+  stroke: #d55337;
+  stroke-width: 2;
+}
+
+.constants-radar-value-point {
+  fill: #d55337;
+  stroke: #ffffff;
+  stroke-width: 1.2;
+}
+
+.constants-radar-label {
+  fill: #4d6172;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.constants-radar-label-value {
+  fill: #8a2f1f;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.constants-radar-max-text {
+  fill: #8a3d20;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.constants-detail-score-list {
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.constants-detail-score-list .constants-detail-card-title {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.constants-score-item {
+  border-radius: 10px;
+  border: 1px solid #ebf1f7;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fcff 100%);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.constants-score-name {
+  color: #698297;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.constants-score-value {
+  color: #1f4f71;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.constants-detail-empty {
+  margin: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+}
+
+@media (max-width: 960px) {
+  .constants-detail-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .constants-detail-left-column {
+    display: contents;
+  }
+
+  .constants-detail-info-card {
+    order: 1;
+  }
+
+  .constants-detail-radar-card {
+    order: 2;
+  }
+
+  .constants-detail-score-list {
+    order: 3;
+  }
+
+  .constants-detail-score-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .chart-detail-panel {

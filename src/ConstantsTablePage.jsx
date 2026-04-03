@@ -1,4 +1,5 @@
-import React, { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Breadcrumb,
   BreadcrumbButton,
@@ -17,6 +18,77 @@ import {
 
 let constantsCache = null;
 
+const ConstantsDataGrid = memo(function ConstantsDataGrid({
+  filteredRows,
+  gridColumns,
+  columnSizingOptions,
+  handleSort,
+  renderSortIcon,
+  openDetail
+}) {
+  return (
+    <DataGrid
+      className="table-grid constants-grid"
+      items={filteredRows}
+      columns={gridColumns}
+      columnSizingOptions={columnSizingOptions}
+      getRowId={(item) => item.id}
+      focusMode="composite"
+    >
+      <DataGridHeader>
+        <DataGridRow>
+          {({ renderHeaderCell, columnId }) => {
+            const columnIndex = Number(String(columnId).replace('col', ''));
+            return (
+              <DataGridHeaderCell
+                onClick={() => handleSort(columnIndex)}
+                className={`${columnIndex === 0 ? 'sticky-first-col-header' : ''} sortable`.trim()}
+                style={columnIndex === 0
+                  ? {
+                    width: 'var(--song-col-width)',
+                    minWidth: 'var(--song-col-width)',
+                    maxWidth: 'var(--song-col-width)',
+                    flexBasis: 'var(--song-col-width)'
+                  }
+                  : undefined}
+              >
+                <span className="header-cell-text">
+                  <span className="header-title-text">{renderHeaderCell()}</span>
+                  <span className="sort-indicator">{renderSortIcon(columnIndex)}</span>
+                </span>
+              </DataGridHeaderCell>
+            );
+          }}
+        </DataGridRow>
+      </DataGridHeader>
+      <DataGridBody>
+        {({ item, rowId }) => (
+          <DataGridRow key={rowId} className="constants-row" onClick={() => openDetail(item)}>
+            {({ renderCell, columnId }) => {
+              const columnIndex = Number(String(columnId).replace('col', ''));
+              return (
+                <DataGridCell
+                  className={columnIndex === 0 ? 'sticky-first-col-cell' : ''}
+                  style={columnIndex === 0
+                    ? {
+                      width: 'var(--song-col-width)',
+                      minWidth: 'var(--song-col-width)',
+                      maxWidth: 'var(--song-col-width)',
+                      flexBasis: 'var(--song-col-width)'
+                    }
+                    : undefined}
+                >
+                  {renderCell(item)}
+                </DataGridCell>
+              );
+            }}
+          </DataGridRow>
+        )}
+      </DataGridBody>
+    </DataGrid>
+  );
+});
+
 function getNumericValue(text) {
   const normalized = String(text || '').trim().replace(/%$/, '');
   if (!normalized) return null;
@@ -24,13 +96,103 @@ function getNumericValue(text) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function ConstantsTablePage({ searchKeyword = '', onCountChange, isActive = false }) {
+function getHeaderBaseName(headerLabel) {
+  return String(headerLabel || '').replace(/\s*\(\d+\)$/, '').trim();
+}
+
+function findLastColumnIndex(headers, baseName) {
+  for (let index = headers.length - 1; index >= 0; index -= 1) {
+    if (getHeaderBaseName(headers[index]?.label) === baseName) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function ConstantsTablePage({ searchKeyword = '', onCountChange, onOpenDetail, isActive = false }) {
+  const [isPending, startTransition] = useTransition();
+  const [isListBusy, setIsListBusy] = useState(false);
   const [sortState, setSortState] = useState({ columnIndex: -1, asc: true });
+  const [appliedSearchKeyword, setAppliedSearchKeyword] = useState(searchKeyword);
   const [headers, setHeaders] = useState([]);
   const [rows, setRows] = useState([]);
   const [loadingState, setLoadingState] = useState({ loading: false, error: '' });
   const [hasActivated, setHasActivated] = useState(isActive);
-  const deferredKeyword = useDeferredValue(searchKeyword);
+  const deferredKeyword = useDeferredValue(appliedSearchKeyword);
+  const pendingRaf1Ref = useRef(0);
+  const pendingRaf2Ref = useRef(0);
+  const pendingTimerRef = useRef(0);
+
+  const clearPendingSchedule = useCallback(() => {
+    if (pendingRaf1Ref.current) {
+      window.cancelAnimationFrame(pendingRaf1Ref.current);
+      pendingRaf1Ref.current = 0;
+    }
+    if (pendingRaf2Ref.current) {
+      window.cancelAnimationFrame(pendingRaf2Ref.current);
+      pendingRaf2Ref.current = 0;
+    }
+    if (pendingTimerRef.current) {
+      window.clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = 0;
+    }
+  }, []);
+
+  const scheduleListUpdate = useCallback((work, options = {}) => {
+    const { immediate = false, mode = 'raf' } = options;
+    clearPendingSchedule();
+
+    if (immediate) {
+      flushSync(() => {
+        setIsListBusy(true);
+      });
+    } else {
+      setIsListBusy(true);
+    }
+
+    if (mode === 'timeout') {
+      pendingTimerRef.current = window.setTimeout(() => {
+        pendingTimerRef.current = 0;
+        startTransition(() => {
+          work();
+        });
+      });
+      return;
+    }
+
+    pendingRaf1Ref.current = window.requestAnimationFrame(() => {
+      pendingRaf1Ref.current = 0;
+      pendingRaf2Ref.current = window.requestAnimationFrame(() => {
+        pendingRaf2Ref.current = 0;
+        startTransition(() => {
+          work();
+        });
+      });
+    });
+  }, [clearPendingSchedule, startTransition]);
+
+  useEffect(() => {
+    if (searchKeyword === appliedSearchKeyword) return;
+    scheduleListUpdate(() => {
+      setAppliedSearchKeyword(searchKeyword);
+    }, { immediate: false, mode: 'raf' });
+  }, [searchKeyword, appliedSearchKeyword, scheduleListUpdate]);
+
+  useEffect(() => {
+    if (!isPending && isListBusy) {
+      const rafId = window.requestAnimationFrame(() => {
+        setIsListBusy(false);
+      });
+      return () => window.cancelAnimationFrame(rafId);
+    }
+    return undefined;
+  }, [isPending, isListBusy]);
+
+  useEffect(() => {
+    return () => {
+      clearPendingSchedule();
+    };
+  }, [clearPendingSchedule]);
 
   useEffect(() => {
     if (isActive) {
@@ -105,6 +267,8 @@ function ConstantsTablePage({ searchKeyword = '', onCountChange, isActive = fals
     return result;
   }, [deferredKeyword, rows, sortState]);
 
+  const isSearchKeywordPending = searchKeyword !== appliedSearchKeyword;
+
   useEffect(() => {
     if (isActive && typeof onCountChange === 'function') {
       onCountChange(filteredRows.length);
@@ -129,19 +293,53 @@ function ConstantsTablePage({ searchKeyword = '', onCountChange, isActive = fals
     });
   }, [headers]);
 
-  function handleSort(columnIndex) {
-    setSortState((prev) => {
-      if (prev.columnIndex === columnIndex) {
-        return { ...prev, asc: !prev.asc };
-      }
-      return { columnIndex, asc: true };
-    });
-  }
+  const handleSort = useCallback((columnIndex) => {
+    scheduleListUpdate(() => {
+      setSortState((prev) => {
+        if (prev.columnIndex === columnIndex) {
+          return { ...prev, asc: !prev.asc };
+        }
+        return { columnIndex, asc: true };
+      });
+    }, { immediate: true, mode: 'timeout' });
+  }, [scheduleListUpdate]);
 
-  function renderSortIcon(columnIndex) {
+  const renderSortIcon = useCallback((columnIndex) => {
     if (sortState.columnIndex !== columnIndex) return '⇅';
     return sortState.asc ? '▲' : '▼';
-  }
+  }, [sortState]);
+
+  const openDetail = useCallback((row) => {
+    if (typeof onOpenDetail !== 'function') return;
+
+    const songIndex = findLastColumnIndex(headers, '歌曲');
+    const categoryIndex = findLastColumnIndex(headers, '分类');
+    const difficultyIndex = findLastColumnIndex(headers, '难度');
+    const branchIndex = findLastColumnIndex(headers, '分支');
+
+    const dimensionNames = ['体力', '手速', '爆发', '节奏', '复合'];
+    const dimensions = dimensionNames.map((name) => {
+      const dimIndex = findLastColumnIndex(headers, name);
+      const raw = dimIndex >= 0 ? row.cells[dimIndex] : '';
+      const numeric = getNumericValue(raw);
+      return {
+        name,
+        raw,
+        value: numeric === null ? 0 : numeric
+      };
+    });
+
+    onOpenDetail({
+      id: row.id,
+      songName: songIndex >= 0 ? row.cells[songIndex] : '',
+      category: categoryIndex >= 0 ? row.cells[categoryIndex] : '',
+      difficulty: difficultyIndex >= 0 ? row.cells[difficultyIndex] : '',
+      branch: branchIndex >= 0 ? row.cells[branchIndex] : '',
+      dimensions,
+      cells: row.cells,
+      headers: headers.map((header) => header.label)
+    });
+  }, [headers, onOpenDetail]);
 
   return (
     <section className="constants-panel" aria-label="定数表页面">
@@ -170,69 +368,26 @@ function ConstantsTablePage({ searchKeyword = '', onCountChange, isActive = fals
           </div>
         ) : null}
         {!loadingState.loading && !loadingState.error ? (
-        <DataGrid
-          className="table-grid constants-grid"
-          items={filteredRows}
-          columns={gridColumns}
-          columnSizingOptions={columnSizingOptions}
-          getRowId={(item) => item.id}
-          focusMode="composite"
-        >
-          <DataGridHeader>
-            <DataGridRow>
-              {({ renderHeaderCell, columnId }) => {
-                const columnIndex = Number(String(columnId).replace('col', ''));
-                return (
-                  <DataGridHeaderCell
-                    onClick={() => handleSort(columnIndex)}
-                    className={`${columnIndex === 0 ? 'sticky-first-col-header' : ''} sortable`.trim()}
-                    style={columnIndex === 0
-                      ? {
-                        width: 'var(--song-col-width)',
-                        minWidth: 'var(--song-col-width)',
-                        maxWidth: 'var(--song-col-width)',
-                        flexBasis: 'var(--song-col-width)'
-                      }
-                      : undefined}
-                  >
-                    <span className="header-cell-text">
-                      <span className="header-title-text">{renderHeaderCell()}</span>
-                      <span className="sort-indicator">{renderSortIcon(columnIndex)}</span>
-                    </span>
-                  </DataGridHeaderCell>
-                );
-              }}
-            </DataGridRow>
-          </DataGridHeader>
-          <DataGridBody>
-            {({ item, rowId }) => (
-              <DataGridRow key={rowId} className="constants-row">
-                {({ renderCell, columnId }) => {
-                  const columnIndex = Number(String(columnId).replace('col', ''));
-                  return (
-                    <DataGridCell
-                      className={columnIndex === 0 ? 'sticky-first-col-cell' : ''}
-                      style={columnIndex === 0
-                        ? {
-                          width: 'var(--song-col-width)',
-                          minWidth: 'var(--song-col-width)',
-                          maxWidth: 'var(--song-col-width)',
-                          flexBasis: 'var(--song-col-width)'
-                        }
-                        : undefined}
-                    >
-                      {renderCell(item)}
-                    </DataGridCell>
-                  );
-                }}
-              </DataGridRow>
-            )}
-          </DataGridBody>
-        </DataGrid>
+          <ConstantsDataGrid
+            filteredRows={filteredRows}
+            gridColumns={gridColumns}
+            columnSizingOptions={columnSizingOptions}
+            handleSort={handleSort}
+            renderSortIcon={renderSortIcon}
+            openDetail={openDetail}
+          />
+        ) : null}
+        {!loadingState.loading && !loadingState.error && (isPending || isListBusy || isSearchKeywordPending) ? (
+          <div className="constants-list-busy-overlay" aria-live="polite" aria-label="列表更新中">
+            <Spinner size="medium" label="更新列表中..." />
+          </div>
         ) : null}
       </div>
     </section>
   );
 }
 
-export default memo(ConstantsTablePage);
+export default memo(ConstantsTablePage, (prevProps, nextProps) => {
+  return prevProps.searchKeyword === nextProps.searchKeyword
+    && prevProps.isActive === nextProps.isActive;
+});
