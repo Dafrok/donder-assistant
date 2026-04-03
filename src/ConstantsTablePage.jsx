@@ -382,7 +382,7 @@ function ConstantsTablePage({ searchKeyword = '', onCountChange, onOpenDetail, i
 
       </header>
 
-      <div className="table-wrapper constants-table-wrapper">
+      <div className="constants-table-wrapper table-wrapper">
         {loadingState.loading ? (
           <div className="constants-loading-wrap">
             <Spinner size="large" label="正在解析定数表..." />
