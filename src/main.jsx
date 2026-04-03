@@ -738,7 +738,9 @@ function App() {
   const isSinglePriceRoute = location.pathname === '/single-price';
   const isTargetScoreRoute = location.pathname === '/target-score';
   const isRootRoute = location.pathname === '/';
-  const chartRouteMatch = matchPath('/chart/:chartId', location.pathname);
+  const chartPreviewRouteMatch = matchPath('/chart/:chartId/preview', location.pathname);
+  const chartDetailRouteMatch = matchPath('/chart/:chartId', location.pathname);
+  const chartRouteMatch = chartPreviewRouteMatch || chartDetailRouteMatch;
   const isChartRoute = Boolean(chartRouteMatch);
   const isKnownRoute = isRootRoute || isAboutRoute || isSinglePriceRoute || isTargetScoreRoute || isChartRoute;
   const routeChartId = useMemo(() => {
@@ -1162,7 +1164,8 @@ function App() {
       category: selectedChartRow.category,
       ratings: selectedChartRow.ratings || null,
       stats: result?.stats || null,
-      bars: result?.bars || []
+      bars: result?.bars || [],
+      tjaContent: typeof song?.tjaContent === 'string' ? song.tjaContent : ''
     };
   }, [allSongsData, selectedChartRow]);
 
@@ -1783,6 +1786,7 @@ function App() {
           {isChartRoute ? (
             <ChartDetailPage
               detail={selectedChartDetail}
+              chartId={routeChartId}
               onBack={closeChartDetailPage}
               isFavorite={selectedChartIsFavorite}
               onToggleFavorite={selectedChartRow ? () => toggleFavoriteChart(selectedChartRow) : undefined}
