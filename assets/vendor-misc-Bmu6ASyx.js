@@ -1,4 +1,4 @@
-import{r as e}from"./vendor-react-Du1rCgyk.js";
+import{r as e}from"./vendor-react-C48o9HEe.js";
 /**
  * react-router v7.13.2
  *
