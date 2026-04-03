@@ -86,6 +86,7 @@ const DIFFICULTY_FILTER_OPTIONS = [
 
 const SORTABLE_COLS = {
   level: 'level',
+  totalNotes: 'totalNotes',
   stamina: 'stamina',
   complex: 'complex',
   complexRatio: 'complexRatio',
@@ -1047,6 +1048,11 @@ function App() {
       }
     }),
     createTableColumn({
+      columnId: 'totalNotes',
+      renderHeaderCell: () => 'Note 数',
+      renderCell: (item) => item.ratings.totalNotes || 0
+    }),
+    createTableColumn({
       columnId: 'stamina',
       renderHeaderCell: () => '体力',
       renderCell: (item) => formatNumber(item.ratings.stamina)
@@ -1464,7 +1470,7 @@ function App() {
       return;
     }
 
-    const rows = ['分类,歌曲,难度,星级,分支,体力,复合,复合难占比,节奏,节奏难占比,手速,爆发'];
+    const rows = ['分类,歌曲,难度,星级,分支,Note数,体力,复合,复合难占比,节奏,节奏难占比,手速,爆发'];
 
     for (let songIndex = 0; songIndex < allResults.length; songIndex += 1) {
       const song = allResults[songIndex];
@@ -1475,7 +1481,7 @@ function App() {
         const level = getChartLevel(sourceSong?.data, chart.difficulty);
 
         rows.push(
-          `"${song.category}","${song.songName}","${difficultyLabel}","${level || ''}","${branchLabel}",${chart.ratings.stamina},${chart.ratings.complex},${chart.ratings.complexRatio},${chart.ratings.rhythm},${chart.ratings.rhythmRatio},${chart.ratings.speed},${chart.ratings.burst}`
+          `"${song.category}","${song.songName}","${difficultyLabel}","${level || ''}","${branchLabel}",${chart.ratings.totalNotes || 0},${chart.ratings.stamina},${chart.ratings.complex},${chart.ratings.complexRatio},${chart.ratings.rhythm},${chart.ratings.rhythmRatio},${chart.ratings.speed},${chart.ratings.burst}`
         );
       }
     }
