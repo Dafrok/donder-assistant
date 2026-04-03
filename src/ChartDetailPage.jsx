@@ -136,6 +136,10 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
   const [overlayOffset, setOverlayOffset] = useState({ x: 0, y: 0 });
   const overlayScaleRef = useRef(1);
   const overlayOffsetRef = useRef({ x: 0, y: 0 });
+  const overlayTransformRafRef = useRef(0);
+  const pendingOverlayScaleRef = useRef(1);
+  const pendingOverlayOffsetRef = useRef({ x: 0, y: 0 });
+  const pendingOverlayCommitRef = useRef({ scale: false, offset: false });
   const overlayRenderDebounceTimerRef = useRef(null);
   const wheelInteractionTimerRef = useRef(null);
 
@@ -183,6 +187,15 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
   useEffect(() => {
     overlayOffsetRef.current = overlayOffset;
   }, [overlayOffset]);
+
+  useEffect(() => {
+    return () => {
+      if (overlayTransformRafRef.current) {
+        window.cancelAnimationFrame(overlayTransformRafRef.current);
+        overlayTransformRafRef.current = 0;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isPreviewRoute) return;
@@ -392,6 +405,38 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
 
   const clampScale = (value) => Math.min(4, Math.max(1, value));
 
+  const queueOverlayTransformCommit = () => {
+    if (overlayTransformRafRef.current) return;
+    overlayTransformRafRef.current = window.requestAnimationFrame(() => {
+      overlayTransformRafRef.current = 0;
+      const commitFlags = pendingOverlayCommitRef.current;
+      if (commitFlags.scale) {
+        setOverlayScale(pendingOverlayScaleRef.current);
+      }
+      if (commitFlags.offset) {
+        setOverlayOffset(pendingOverlayOffsetRef.current);
+      }
+      pendingOverlayCommitRef.current = { scale: false, offset: false };
+    });
+  };
+
+  const commitOverlayOffset = (nextOffset) => {
+    overlayOffsetRef.current = nextOffset;
+    pendingOverlayOffsetRef.current = nextOffset;
+    pendingOverlayCommitRef.current.offset = true;
+    queueOverlayTransformCommit();
+  };
+
+  const commitOverlayScaleAndOffset = (nextScale, nextOffset) => {
+    overlayScaleRef.current = nextScale;
+    overlayOffsetRef.current = nextOffset;
+    pendingOverlayScaleRef.current = nextScale;
+    pendingOverlayOffsetRef.current = nextOffset;
+    pendingOverlayCommitRef.current.scale = true;
+    pendingOverlayCommitRef.current.offset = true;
+    queueOverlayTransformCommit();
+  };
+
   const getFitScale = () => {
     const viewport = overlayViewportRef.current;
     const canvas = overlayCanvasRef.current;
@@ -547,8 +592,7 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
     }
 
     const clampedOffset = clampOverlayOffset(nextOffset, targetScale);
-    setOverlayScale(targetScale);
-    setOverlayOffset(clampedOffset);
+    commitOverlayScaleAndOffset(targetScale, clampedOffset);
   }
 
   function handleOverlayWheel(event) {
@@ -585,8 +629,7 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
       y: pointerY - contentY * nextScale
     };
 
-    setOverlayScale(nextScale);
-    setOverlayOffset(clampOverlayOffset(nextOffset, nextScale));
+    commitOverlayScaleAndOffset(nextScale, clampOverlayOffset(nextOffset, nextScale));
 
     wheelInteractionTimerRef.current = setTimeout(() => {
       setIsDirectManipulating(false);
@@ -610,7 +653,7 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
     if (!dragStateRef.current.active) return;
     const dx = event.clientX - dragStateRef.current.startX;
     const dy = event.clientY - dragStateRef.current.startY;
-    setOverlayOffset(clampOverlayOffset({
+    commitOverlayOffset(clampOverlayOffset({
       x: dragStateRef.current.offsetX + dx,
       y: dragStateRef.current.offsetY + dy
     }));
@@ -656,7 +699,7 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
       const touch = event.touches[0];
       const dx = touch.clientX - touchStateRef.current.startPoint.x;
       const dy = touch.clientY - touchStateRef.current.startPoint.y;
-      setOverlayOffset(clampOverlayOffset({
+      commitOverlayOffset(clampOverlayOffset({
         x: touchStateRef.current.startOffset.x + dx,
         y: touchStateRef.current.startOffset.y + dy
       }));
@@ -671,8 +714,7 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
       const contentX = (touchStateRef.current.startCenter.x - touchStateRef.current.startOffset.x) / touchStateRef.current.startScale;
       const contentY = (touchStateRef.current.startCenter.y - touchStateRef.current.startOffset.y) / touchStateRef.current.startScale;
 
-      setOverlayScale(nextScale);
-      setOverlayOffset(clampOverlayOffset({
+      commitOverlayScaleAndOffset(nextScale, clampOverlayOffset({
         x: center.x - contentX * nextScale,
         y: center.y - contentY * nextScale
       }, nextScale));
