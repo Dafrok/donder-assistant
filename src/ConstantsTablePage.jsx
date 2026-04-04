@@ -11,7 +11,7 @@ import {
 import { VirtualizerScrollView } from '@fluentui/react-virtualizer';
 
 let constantsCache = null;
-const ROW_HEIGHT = 52;
+const ROW_HEIGHT = 44;
 
 function getCategoryBadgeClass(category) {
   const normalized = String(category || '').trim().toLowerCase();

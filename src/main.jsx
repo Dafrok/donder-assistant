@@ -15,12 +15,6 @@ import {
   DialogSurface,
   DialogTitle,
   DialogTrigger,
-  DataGrid,
-  DataGridBody,
-  DataGridCell,
-  DataGridHeader,
-  DataGridHeaderCell,
-  DataGridRow,
   FluentProvider,
   Hamburger,
   Input,
@@ -35,10 +29,10 @@ import {
   Toolbar,
   ToolbarButton,
   createLightTheme,
-  createTableColumn,
   Title3,
   webLightTheme
 } from '@fluentui/react-components';
+import { VirtualizerScrollView } from '@fluentui/react-virtualizer';
 import {
   ArrowDownloadRegular,
   ArrowUploadRegular,
@@ -678,6 +672,8 @@ async function hashText(text) {
     .join('');
 }
 
+const ANALYSIS_ROW_HEIGHT = 44;
+
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -719,8 +715,6 @@ function App() {
     if (!Array.isArray(ids)) return new Set();
     return new Set(ids.filter((id) => typeof id === 'string' && id));
   });
-  const [currentPage, setCurrentPage] = useState(1);
-  const ROWS_PER_PAGE = 50;
 
   const routeSearchKeyword = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -739,11 +733,6 @@ function App() {
       // Ignore storage access errors.
     }
   }, [diffFilter]);
-
-  // 当过滤条件改变时，重置回第一页
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [diffFilter, searchKeyword, sortState]);
 
   const isAboutRoute = location.pathname === '/about';
   const isConstantsRoute = location.pathname === '/constants';
@@ -1072,36 +1061,40 @@ function App() {
     return grouped;
   }, [currentRows]);
 
-  const columnSizingOptions = useMemo(() => ({
-    songName: {
-      minWidth: 220,
-      idealWidth: 220,
-      defaultWidth: 220
-    }
-  }), []);
-
-  const gridColumns = useMemo(() => ([
-    createTableColumn({
-      columnId: 'songName',
-      renderHeaderCell: () => '歌曲名',
+  const analysisColumns = useMemo(() => ([
+    {
+      id: 'songName',
+      label: '歌曲名',
+      sortable: false,
+      className: 'sticky-first-col-cell',
+      headerClassName: 'sticky-first-col-header',
+      style: {
+        width: 'var(--song-col-width)',
+        minWidth: 'var(--song-col-width)',
+        maxWidth: 'var(--song-col-width)',
+        flexBasis: 'var(--song-col-width)'
+      },
       renderCell: (item) => item.songName
-    }),
-    createTableColumn({
-      columnId: 'difficulty',
-      renderHeaderCell: () => '难度',
+    },
+    {
+      id: 'difficulty',
+      label: '难度',
+      sortable: true,
       renderCell: (item) => {
         const diffLabel = DIFFICULTY_LABELS[item.difficulty] || item.difficulty;
         return <span style={{ color: getDifficultyColor(item.difficulty), fontWeight: 700 }}>{diffLabel}</span>;
       }
-    }),
-    createTableColumn({
-      columnId: 'level',
-      renderHeaderCell: () => '星级',
+    },
+    {
+      id: 'level',
+      label: '星级',
+      sortable: true,
       renderCell: (item) => (item.level ? `★${item.level}` : '-')
-    }),
-    createTableColumn({
-      columnId: 'branchType',
-      renderHeaderCell: () => '分歧',
+    },
+    {
+      id: 'branchType',
+      label: '分歧',
+      sortable: false,
       renderCell: (item) => {
         const branchLabel = BRANCH_LABELS[item.branchType] || '';
         if (!branchLabel) {
@@ -1109,50 +1102,25 @@ function App() {
         }
         return <span style={{ color: getBranchColor(item.branchType), fontWeight: 600 }}>{branchLabel}</span>;
       }
-    }),
-    createTableColumn({
-      columnId: 'totalNotes',
-      renderHeaderCell: () => 'Note 数',
-      renderCell: (item) => item.ratings.totalNotes || 0
-    }),
-    createTableColumn({
-      columnId: 'stamina',
-      renderHeaderCell: () => '体力',
-      renderCell: (item) => formatNumber(item.ratings.stamina)
-    }),
-    createTableColumn({
-      columnId: 'complex',
-      renderHeaderCell: () => '复合',
-      renderCell: (item) => formatNumber(item.ratings.complex)
-    }),
-    createTableColumn({
-      columnId: 'complexRatio',
-      renderHeaderCell: () => '复合难占比',
-      renderCell: (item) => formatNumber(item.ratings.complexRatio)
-    }),
-    createTableColumn({
-      columnId: 'rhythm',
-      renderHeaderCell: () => '节奏',
-      renderCell: (item) => formatNumber(item.ratings.rhythm)
-    }),
-    createTableColumn({
-      columnId: 'rhythmRatio',
-      renderHeaderCell: () => '节奏难占比',
-      renderCell: (item) => formatNumber(item.ratings.rhythmRatio)
-    }),
-    createTableColumn({
-      columnId: 'speed',
-      renderHeaderCell: () => '手速',
-      renderCell: (item) => formatNumber(item.ratings.speed)
-    }),
-    createTableColumn({
-      columnId: 'burst',
-      renderHeaderCell: () => '爆发',
-      renderCell: (item) => formatNumber(item.ratings.burst)
-    }),
-    createTableColumn({
-      columnId: 'favorite',
-      renderHeaderCell: () => '收藏',
+    },
+    { id: 'totalNotes', label: 'Note 数', sortable: true, renderCell: (item) => item.ratings.totalNotes || 0 },
+    { id: 'stamina', label: '体力', sortable: true, renderCell: (item) => formatNumber(item.ratings.stamina) },
+    { id: 'complex', label: '复合', sortable: true, renderCell: (item) => formatNumber(item.ratings.complex) },
+    { id: 'complexRatio', label: '复合难占比', sortable: true, renderCell: (item) => formatNumber(item.ratings.complexRatio) },
+    { id: 'rhythm', label: '节奏', sortable: true, renderCell: (item) => formatNumber(item.ratings.rhythm) },
+    { id: 'rhythmRatio', label: '节奏难占比', sortable: true, renderCell: (item) => formatNumber(item.ratings.rhythmRatio) },
+    { id: 'speed', label: '手速', sortable: true, renderCell: (item) => formatNumber(item.ratings.speed) },
+    { id: 'burst', label: '爆发', sortable: true, renderCell: (item) => formatNumber(item.ratings.burst) },
+    {
+      id: 'favorite',
+      label: '收藏',
+      sortable: false,
+      style: {
+        width: '88px',
+        minWidth: '88px',
+        maxWidth: '88px',
+        flexBasis: '88px'
+      },
       renderCell: (item) => {
         const relatedChartIds = chartIdsBySongIndex.get(item.songIndex) || [item.id];
         const isFavorite = relatedChartIds.every((chartId) => favoriteChartIds.has(chartId));
@@ -1169,7 +1137,7 @@ function App() {
           />
         );
       }
-    })
+    }
   ]), [favoriteChartIds, chartIdsBySongIndex]);
 
   const filteredRows = useMemo(() => {
@@ -1199,24 +1167,6 @@ function App() {
       return text.includes(keyword);
     });
   }, [currentRows, diffFilter, searchKeyword, sortState]);
-
-  // 分页计算
-  const paginationInfo = useMemo(() => {
-    const total = filteredRows.length;
-    const totalPages = Math.ceil(total / ROWS_PER_PAGE);
-    const validPage = Math.max(1, Math.min(currentPage, totalPages || 1));
-    const startIndex = (validPage - 1) * ROWS_PER_PAGE;
-    const endIndex = startIndex + ROWS_PER_PAGE;
-    const paginatedRows = filteredRows.slice(startIndex, endIndex);
-    return {
-      paginatedRows,
-      currentPage: validPage,
-      totalPages,
-      totalRows: total,
-      startIndex,
-      endIndex
-    };
-  }, [filteredRows, currentPage, ROWS_PER_PAGE]);
 
   const selectedChartRow = useMemo(() => {
     if (!routeChartId) return null;
@@ -1829,83 +1779,57 @@ function App() {
                 <Body1 className="hint">支持 .TJA 谱面，兼容任意目录结构</Body1>
               </div>
             ) : (
-              <div className="table-wrapper">
-                <DataGrid
-                  className="table-grid"
-                  items={paginationInfo.paginatedRows}
-                  columns={gridColumns}
-                  columnSizingOptions={columnSizingOptions}
-                  getRowId={(item) => item.id}
-                  focusMode="composite"
-                >
-                  <DataGridHeader>
-                    <DataGridRow>
-                      {({ renderHeaderCell, columnId }) => (
-                        <DataGridHeaderCell
-                          onClick={() => onSort(columnId)}
-                          className={`${SORTABLE_COLS[columnId] ? 'sortable' : ''} ${columnId === 'songName' ? 'sticky-first-col-header' : ''}`.trim()}
-                          style={columnId === 'songName'
-                            ? {
-                              width: 'var(--song-col-width)',
-                              minWidth: 'var(--song-col-width)',
-                              maxWidth: 'var(--song-col-width)',
-                              flexBasis: 'var(--song-col-width)'
-                            }
-                            : undefined}
+              <div className="table-wrapper analysis-table-wrapper">
+                <div className="table-grid analysis-virtual-grid" role="table" aria-label="谱面分析表格">
+                  <div className="analysis-virtual-header" role="rowgroup">
+                    <div className="analysis-virtual-header-row" role="row">
+                      {analysisColumns.map((column, columnIndex) => (
+                        <div
+                          key={column.id}
+                          role="columnheader"
+                          aria-colindex={columnIndex + 1}
+                          onClick={() => onSort(column.id)}
+                          className={`${column.sortable ? 'sortable' : ''} ${column.headerClassName || ''} analysis-virtual-cell analysis-virtual-header-cell`.trim()}
+                          style={column.style}
                         >
                           <span className="header-cell-text">
-                            <span className="header-title-text">{renderHeaderCell()}</span>
-                            {SORTABLE_COLS[columnId] ? <span className="sort-indicator">{sortIndicator(columnId)}</span> : null}
+                            <span className="header-title-text">{column.label}</span>
+                            {column.sortable ? <span className="sort-indicator">{sortIndicator(column.id)}</span> : null}
                           </span>
-                        </DataGridHeaderCell>
-                      )}
-                    </DataGridRow>
-                  </DataGridHeader>
-                  <DataGridBody>
-                    {({ item, rowId }) => (
-                      <DataGridRow key={rowId} className="result-row" onClick={() => openChartDetailPage(item)}>
-                        {({ renderCell, columnId }) => (
-                          <DataGridCell
-                            className={columnId === 'songName' ? 'sticky-first-col-cell' : ''}
-                            style={columnId === 'songName'
-                              ? {
-                                width: 'var(--song-col-width)',
-                                minWidth: 'var(--song-col-width)',
-                                maxWidth: 'var(--song-col-width)',
-                                flexBasis: 'var(--song-col-width)'
-                              }
-                              : undefined}
-                          >
-                            {renderCell(item)}
-                          </DataGridCell>
-                        )}
-                      </DataGridRow>
-                    )}
-                  </DataGridBody>
-                </DataGrid>
-                <div className="pagination-controls" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', padding: '16px', borderTop: '1px solid #f0f0f0' }}>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    disabled={paginationInfo.currentPage <= 1}
-                    onClick={() => setCurrentPage(Math.max(1, paginationInfo.currentPage - 1))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <VirtualizerScrollView
+                    className="analysis-virtual-scroll-root"
+                    container={{ className: 'analysis-virtual-scroll-container' }}
+                    numItems={filteredRows.length}
+                    itemSize={ANALYSIS_ROW_HEIGHT}
+                    axis="vertical"
                   >
-                    上一页
-                  </Button>
-                  <Body1 style={{ margin: '0 8px', minWidth: '120px', textAlign: 'center' }}>
-                    第 {paginationInfo.currentPage} / {paginationInfo.totalPages} 页
-                    <span style={{ fontSize: '12px', color: '#767676', marginLeft: '8px' }}>
-                      (共 {paginationInfo.totalRows} 条)
-                    </span>
-                  </Body1>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    disabled={paginationInfo.currentPage >= paginationInfo.totalPages}
-                    onClick={() => setCurrentPage(Math.min(paginationInfo.totalPages, paginationInfo.currentPage + 1))}
-                  >
-                    下一页
-                  </Button>
+                    {(index) => {
+                      const item = filteredRows[index];
+                      if (!item) return null;
+
+                      return (
+                        <div key={item.id} className="result-row analysis-virtual-row" role="row" onClick={() => openChartDetailPage(item)}>
+                          {analysisColumns.map((column, columnIndex) => (
+                            <div
+                              key={`${item.id}-${column.id}`}
+                              role="gridcell"
+                              aria-colindex={columnIndex + 1}
+                              className={`${column.className || ''} analysis-virtual-cell`.trim()}
+                              style={column.style}
+                            >
+                              {column.id === 'favorite'
+                                ? column.renderCell(item)
+                                : <span className="analysis-cell-text">{column.renderCell(item)}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }}
+                  </VirtualizerScrollView>
                 </div>
               </div>
             )}
@@ -1950,8 +1874,8 @@ function App() {
                   </Body1>
                   <Body1 className="list-stat">
                     <span className="list-stat-label">谱面：</span>
-                    <span className="list-stat-value">{paginationInfo.totalRows}</span>
-                    {paginationInfo.totalRows < totalCharts ? (
+                    <span className="list-stat-value">{filteredRows.length}</span>
+                    {filteredRows.length < totalCharts ? (
                       <span style={{ fontSize: '12px', color: '#767676', marginLeft: '8px' }}>
                         (过滤后 / 全部 {totalCharts})
                       </span>
