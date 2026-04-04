@@ -430,6 +430,18 @@ body {
   white-space: nowrap;
 }
 
+.constants-breadcrumb-song {
+  max-width: min(52vw, 420px);
+  min-width: 0;
+}
+
+.constants-breadcrumb-song-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .list-toolbar {
   display: flex;
   align-items: center;

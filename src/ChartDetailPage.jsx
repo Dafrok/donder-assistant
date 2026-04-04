@@ -785,6 +785,10 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
         <div className="chart-detail-header-row">
           <Breadcrumb className="list-breadcrumb" aria-label="谱面详情面包屑">
             <BreadcrumbItem>
+              <BreadcrumbButton onClick={onBack}>数据分析</BreadcrumbButton>
+            </BreadcrumbItem>
+            <BreadcrumbDivider />
+            <BreadcrumbItem>
               <BreadcrumbButton onClick={onBack}>谱面分析</BreadcrumbButton>
             </BreadcrumbItem>
             <BreadcrumbDivider />

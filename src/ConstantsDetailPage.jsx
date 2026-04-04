@@ -111,7 +111,9 @@ function ConstantsDetailPage({ detail, onBack }) {
           </BreadcrumbItem>
           <BreadcrumbDivider />
           <BreadcrumbItem>
-            <BreadcrumbButton current aria-current="page">{detail?.songName || '详情'}</BreadcrumbButton>
+            <BreadcrumbButton className="constants-breadcrumb-song" current aria-current="page">
+              <span className="constants-breadcrumb-song-text">{detail?.songName || '详情'}</span>
+            </BreadcrumbButton>
           </BreadcrumbItem>
         </Breadcrumb>
       </header>
