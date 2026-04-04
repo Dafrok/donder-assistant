@@ -196,6 +196,15 @@ function findLastColumnIndex(headers, baseName) {
   return -1;
 }
 
+function getBranchSortRank(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return 99;
+  if (normalized.includes('master') || normalized.includes('达人')) return 0;
+  if (normalized.includes('expert') || normalized.includes('玄人')) return 1;
+  if (normalized.includes('normal') || normalized.includes('普通')) return 2;
+  return 98;
+}
+
 function ConstantsTablePage({ searchKeyword = '', onCountChange, onOpenDetail, isActive = false }) {
   const [isPending, startTransition] = useTransition();
   const [isListBusy, setIsListBusy] = useState(false);
@@ -334,9 +343,16 @@ function ConstantsTablePage({ searchKeyword = '', onCountChange, onOpenDetail, i
     }
 
     if (sortState.columnIndex >= 0) {
+      const branchColumnIndex = findLastColumnIndex(headers, '分支');
       result = [...result].sort((a, b) => {
         const left = a.cells[sortState.columnIndex] || '';
         const right = b.cells[sortState.columnIndex] || '';
+
+        if (sortState.columnIndex === branchColumnIndex) {
+          const compare = getBranchSortRank(left) - getBranchSortRank(right);
+          return sortState.asc ? compare : -compare;
+        }
+
         const leftNum = getNumericValue(left);
         const rightNum = getNumericValue(right);
 
