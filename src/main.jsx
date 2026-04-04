@@ -56,6 +56,7 @@ import AboutPage from './AboutPage.jsx';
 import ChartDetailPage from './ChartDetailPage.jsx';
 import ConstantsDetailPage from './ConstantsDetailPage.jsx';
 import ConstantsTablePage from './ConstantsTablePage.jsx';
+import PracticeModePage from './PracticeModePage.jsx';
 import SingleSongPricePage from './SingleSongPricePage.jsx';
 import TargetScorePage from './TargetScorePage.jsx';
 import './styles.css';
@@ -746,13 +747,14 @@ function App() {
   const isConstantsDetailRoute = Boolean(constantsDetailRouteMatch);
   const isSinglePriceRoute = location.pathname === '/single-price';
   const isTargetScoreRoute = location.pathname === '/target-score';
+  const isPracticeRoute = location.pathname === '/practice';
   const isAnalysisRoute = location.pathname === '/analysis';
   const isRootRoute = location.pathname === '/';
   const chartPreviewRouteMatch = matchPath('/chart/:chartId/preview', location.pathname);
   const chartDetailRouteMatch = matchPath('/chart/:chartId', location.pathname);
   const chartRouteMatch = chartPreviewRouteMatch || chartDetailRouteMatch;
   const isChartRoute = Boolean(chartRouteMatch);
-  const isKnownRoute = isRootRoute || isAnalysisRoute || isConstantsRoute || isConstantsDetailRoute || isAboutRoute || isSinglePriceRoute || isTargetScoreRoute || isChartRoute;
+  const isKnownRoute = isRootRoute || isAnalysisRoute || isConstantsRoute || isConstantsDetailRoute || isAboutRoute || isSinglePriceRoute || isTargetScoreRoute || isPracticeRoute || isChartRoute;
   const routeChartId = useMemo(() => {
     if (!chartRouteMatch?.params?.chartId) return '';
     try {
@@ -1596,7 +1598,8 @@ function App() {
     analysis: '/analysis',
     about: '/about',
     singlePrice: '/single-price',
-    targetScore: '/target-score'
+    targetScore: '/target-score',
+    practice: '/practice'
   }), []);
 
   const handleNavSelect = useCallback((_, data) => {
@@ -1610,10 +1613,11 @@ function App() {
   const selectedNavValue = useMemo(() => {
     if (isAboutRoute) return 'about';
     if (isTargetScoreRoute) return 'targetScore';
+    if (isPracticeRoute) return 'practice';
     if (isSinglePriceRoute) return 'singlePrice';
     if (isConstantsRoute || isConstantsDetailRoute) return 'constants';
     return 'analysis';
-  }, [isAboutRoute, isTargetScoreRoute, isSinglePriceRoute, isConstantsRoute, isConstantsDetailRoute]);
+  }, [isAboutRoute, isTargetScoreRoute, isPracticeRoute, isSinglePriceRoute, isConstantsRoute, isConstantsDetailRoute]);
 
   const openConstantsDetail = useCallback((detail) => {
     if (!detail?.id) return;
@@ -1729,6 +1733,7 @@ function App() {
               <NavSectionHeader>出勤工具</NavSectionHeader>
               <NavItem value="singlePrice" icon={<MoneyCalculator20Regular />}>单曲价格速算</NavItem>
               <NavItem value="targetScore" icon={<Calculator20Regular />}>目标成绩速算</NavItem>
+              <NavItem value="practice" icon={<ArrowUploadRegular />}>练习模式</NavItem>
 
               <NavDivider />
               <NavItem value="about" icon={<Info20Regular />}>关于</NavItem>
@@ -1874,6 +1879,7 @@ function App() {
           ) : null}
           {isSinglePriceRoute ? <SingleSongPricePage onBack={() => navigate('/constants')} /> : null}
           {isTargetScoreRoute ? <TargetScorePage onBack={() => navigate('/constants')} /> : null}
+          {isPracticeRoute ? <PracticeModePage /> : null}
           {isChartRoute ? (
             <ChartDetailPage
               detail={selectedChartDetail}

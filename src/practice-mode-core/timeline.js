@@ -1,0 +1,194 @@
+import { getEffectiveBpm } from '../../TJARenderer/src/tja-parser.ts';
+import { NoteType } from '../../TJARenderer/src/primitives.ts';
+import { NOTE_SMALL_RADIUS } from './constants.js';
+
+const JUDGE_PARTICLE_COUNT = 18;
+const JUDGEABLE_NOTE_SET = new Set([NoteType.Don, NoteType.Ka, NoteType.DonBig, NoteType.KaBig]);
+
+function toLaneNoteType(noteType) {
+  if (noteType === NoteType.Don || noteType === NoteType.DonBig) return 'don';
+  if (noteType === NoteType.Ka || noteType === NoteType.KaBig) return 'ka';
+  return null;
+}
+
+function isBigNoteType(noteType) {
+  return noteType === NoteType.DonBig || noteType === NoteType.KaBig;
+}
+
+export function buildJudgeParticles() {
+  return Array.from({ length: JUDGE_PARTICLE_COUNT }, (_, idx) => {
+    const angle = (Math.PI * 2 * idx) / JUDGE_PARTICLE_COUNT + (Math.random() - 0.5) * 0.2;
+    return {
+      angle,
+      speed: 430 + Math.random() * 270,
+      radius: 2.6 + Math.random() * 3.2
+    };
+  });
+}
+
+export function buildTimeline(playableChart, initialTimeMs = 0) {
+  const bars = playableChart?.bars || [];
+  const barParams = playableChart?.barParams || [];
+
+  let currentMs = initialTimeMs;
+  let noteOrdinal = 0;
+  const notes = [];
+  const barLines = [];
+  const flatEvents = [];
+
+  for (let barIndex = 0; barIndex < bars.length; barIndex += 1) {
+    const bar = bars[barIndex] || [];
+    const params = barParams[barIndex];
+    if (!params || !bar.length) {
+      continue;
+    }
+
+    if (barIndex > 0) {
+      barLines.push({
+        id: `bar-${barIndex}`,
+        timeMs: currentMs
+      });
+    }
+
+    const charTimings = new Array(bar.length + 1).fill(0);
+    for (let i = 0; i < bar.length; i += 1) {
+      const bpm = getEffectiveBpm(params, i);
+      const stepMs = ((params.measureRatio / bar.length) * 240000) / bpm;
+      charTimings[i + 1] = charTimings[i] + stepMs;
+    }
+
+    for (let charIndex = 0; charIndex < bar.length; charIndex += 1) {
+      const note = bar[charIndex];
+      const eventTimeMs = currentMs + charTimings[charIndex];
+
+      flatEvents.push({
+        barIndex,
+        charIndex,
+        note,
+        timeMs: eventTimeMs
+      });
+
+      if (!JUDGEABLE_NOTE_SET.has(note)) continue;
+      const laneType = toLaneNoteType(note);
+      if (!laneType) continue;
+      noteOrdinal += 1;
+      notes.push({
+        id: `${barIndex}-${charIndex}-${noteOrdinal}`,
+        type: laneType,
+        isBig: isBigNoteType(note),
+        timeMs: eventTimeMs,
+        judged: false,
+        result: null,
+        delta: null
+      });
+    }
+
+    currentMs += charTimings[bar.length];
+  }
+
+  const rolls = [];
+  const balloons = [];
+  const balloonCounts = Array.isArray(playableChart?.balloonCounts) ? playableChart.balloonCounts : [];
+  let balloonOrdinal = 0;
+  for (let i = 0; i < flatEvents.length; i += 1) {
+    const current = flatEvents[i];
+    if (current.note === NoteType.Drumroll || current.note === NoteType.DrumrollBig) {
+      let endTimeMs = currentMs;
+      for (let j = i + 1; j < flatEvents.length; j += 1) {
+        if (flatEvents[j].note === NoteType.End) {
+          endTimeMs = flatEvents[j].timeMs;
+          break;
+        }
+      }
+      rolls.push({
+        id: `roll-${current.barIndex}-${current.charIndex}`,
+        isBig: current.note === NoteType.DrumrollBig,
+        startMs: current.timeMs,
+        endMs: Math.max(current.timeMs + 80, endTimeMs)
+      });
+    } else if (current.note === NoteType.Balloon || current.note === NoteType.Kusudama) {
+      let endTimeMs = currentMs;
+      for (let j = i + 1; j < flatEvents.length; j += 1) {
+        if (flatEvents[j].note === NoteType.End) {
+          endTimeMs = flatEvents[j].timeMs;
+          break;
+        }
+      }
+      const requiredHitsRaw = balloonCounts[balloonOrdinal];
+      const requiredHits = Number.isFinite(requiredHitsRaw)
+        ? Math.max(1, Math.floor(requiredHitsRaw))
+        : (current.note === NoteType.Kusudama ? 20 : 5);
+      balloonOrdinal += 1;
+      balloons.push({
+        id: `balloon-${current.barIndex}-${current.charIndex}`,
+        isBig: current.note === NoteType.Kusudama,
+        timeMs: current.timeMs,
+        endMs: Math.max(current.timeMs + 320, endTimeMs),
+        requiredHits,
+        remainingHits: requiredHits,
+        popped: false,
+        pulseAtMs: null
+      });
+    }
+  }
+
+  return {
+    durationMs: currentMs,
+    notes,
+    barLines,
+    rolls,
+    balloons
+  };
+}
+
+function shiftTimeline(timeline, deltaMs) {
+  if (!deltaMs) return timeline;
+  return {
+    ...timeline,
+    durationMs: timeline.durationMs + deltaMs,
+    notes: (timeline.notes || []).map((note) => ({ ...note, timeMs: note.timeMs + deltaMs })),
+    barLines: (timeline.barLines || []).map((barLine) => ({ ...barLine, timeMs: barLine.timeMs + deltaMs })),
+    rolls: (timeline.rolls || []).map((roll) => ({
+      ...roll,
+      startMs: roll.startMs + deltaMs,
+      endMs: roll.endMs + deltaMs
+    })),
+    balloons: (timeline.balloons || []).map((balloon) => ({
+      ...balloon,
+      timeMs: balloon.timeMs + deltaMs,
+      endMs: balloon.endMs + deltaMs,
+      pulseAtMs: Number.isFinite(balloon.pulseAtMs) ? balloon.pulseAtMs + deltaMs : balloon.pulseAtMs
+    }))
+  };
+}
+
+export function resolveTimelineAudioSync(timeline) {
+  const firstNoteTimeMs = (timeline.notes || [])[0]?.timeMs;
+  if (Number.isFinite(firstNoteTimeMs) && firstNoteTimeMs < 0) {
+    return {
+      timeline: shiftTimeline(timeline, -firstNoteTimeMs),
+      audioSyncOffsetMs: firstNoteTimeMs
+    };
+  }
+  return {
+    timeline,
+    audioSyncOffsetMs: 0
+  };
+}
+
+export function getChartReferenceBpm(chart) {
+  if (!chart) return 120;
+  if (Number.isFinite(chart.bpm) && chart.bpm > 0) return chart.bpm;
+  const firstParams = chart.barParams?.[0];
+  if (firstParams && Number.isFinite(firstParams.initialBpm) && firstParams.initialBpm > 0) {
+    return firstParams.initialBpm;
+  }
+  return 120;
+}
+
+export function computeScrollPxPerMsByBpm(referenceBpm) {
+  const beat16Ms = 60000 / (referenceBpm * 4);
+  const targetSpacingPx = NOTE_SMALL_RADIUS * 2;
+  const value = targetSpacingPx / beat16Ms;
+  return Math.max(0.2, Math.min(2.2, value));
+}

@@ -1,0 +1,2183 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import JSZip from 'jszip';
+import PracticeBreadcrumb from './practice-mode/PracticeBreadcrumb.jsx';
+import PracticeToolbar from './practice-mode/PracticeToolbar.jsx';
+import PracticeStage from './practice-mode/PracticeStage.jsx';
+import { parseTJA } from '../TJARenderer/src/tja-parser.ts';
+import {
+  BAD_WINDOW,
+  BALLOON_POP_FX_MS,
+  BALLOON_PULSE_MS,
+  BRANCH_SCROLL_THEME,
+  DEFAULT_NOTE_SCROLL_PX_PER_MS,
+  DON_KEYS,
+  HIT_FLASH_MS,
+  HIT_NOTE_FLY_MS,
+  HIT_NOTE_HOLD_MS,
+  JUDGE_FEEDBACK_MS,
+  JUDGE_FLASH_MS,
+  KA_KEYS,
+  LANE_TARGET_X,
+  MOBILE_TOOLBAR_BREAKPOINT,
+  NOTE_SMALL_RADIUS,
+  PRE_ROLL_MS,
+  ROLL_COUNT_HOLD_MS,
+  TOUCH_GUIDE_VIBRATION_MS,
+  buildJudgeParticles,
+  buildTimeline,
+  computeScrollPxPerMsByBpm,
+  decodeTjaBytes,
+  extractWavePath,
+  findBestCandidate,
+  getAudioMimeType,
+  getBranchOptions,
+  getChartReferenceBpm,
+  getHitResult,
+  getPreferredBranchSelection,
+  isAudioPath,
+  joinPath,
+  markExpiredMisses,
+  normalizePath,
+  pathBase,
+  pathDir,
+  readText,
+  resolveChartByBranch,
+  resolveMainCourse,
+  resolvePlayableChart,
+  resolveTimelineAudioSync,
+  summarizeResults
+} from './practice-mode-core.js';
+
+function PracticeModePage() {
+  const fileInputRef = useRef(null);
+  const canvasRef = useRef(null);
+  const touchGuideCanvasRef = useRef(null);
+  const rafRef = useRef(0);
+  const playStartRef = useRef(0);
+  const scheduledStartRef = useRef(0);
+  const pausedAtMsRef = useRef(-PRE_ROLL_MS);
+  const pendingResetAfterSeekRef = useRef(false);
+  const missIgnoreBeforeMsRef = useRef(-Infinity);
+  const suppressNotesBeforeMsRef = useRef(-Infinity);
+  const hasUsedBarSeekRef = useRef(false);
+  const audioStartTimerRef = useRef(0);
+  const audioRef = useRef(typeof Audio !== 'undefined' ? new Audio() : null);
+  const sfxCtxRef = useRef(null);
+  const sfxCompressorRef = useRef(null);
+  const sfxMasterGainRef = useRef(null);
+  const sfxReverbSendRef = useRef(null);
+  const sfxNoiseBufferRef = useRef(null);
+  const hitFxRef = useRef([]);
+  const judgeFxRef = useRef([]);
+  const balloonFxRef = useRef([]);
+  const hitNoteFxRef = useRef([]);
+  const touchGuidePulseRef = useRef([]);
+  const hitFxRafRef = useRef(0);
+
+  const [, setStatusText] = useState('准备就绪：导入本地 TJA 后点击开始。按键：F/J=咚，D/K=咔。');
+  const [songTitle, setSongTitle] = useState('');
+  const [difficultyText, setDifficultyText] = useState('');
+  const [baseChartForBranch, setBaseChartForBranch] = useState(null);
+  const [availableBranches, setAvailableBranches] = useState([]);
+  const [branchSelection, setBranchSelection] = useState('master');
+  const [notes, setNotes] = useState([]);
+  const [barLines, setBarLines] = useState([]);
+  const [rolls, setRolls] = useState([]);
+  const [rollHitCounts, setRollHitCounts] = useState({});
+  const [rollBalloonHits, setRollBalloonHits] = useState(0);
+  const [streakHits, setStreakHits] = useState(0);
+  const [balloons, setBalloons] = useState([]);
+  const [durationMs, setDurationMs] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [nowMs, setNowMs] = useState(-PRE_ROLL_MS);
+  const [scrollPxPerMs, setScrollPxPerMs] = useState(DEFAULT_NOTE_SCROLL_PX_PER_MS);
+  const [chartStartOffsetMs, setChartStartOffsetMs] = useState(0);
+  const [audioSyncOffsetMs, setAudioSyncOffsetMs] = useState(0);
+  const [audioObjectUrl, setAudioObjectUrl] = useState('');
+  const [audioMimeType, setAudioMimeType] = useState('');
+  const [hitFxTick, setHitFxTick] = useState(0);
+  const [isMobileToolbar, setIsMobileToolbar] = useState(() => (
+    typeof window !== 'undefined' ? window.innerWidth <= MOBILE_TOOLBAR_BREAKPOINT : false
+  ));
+
+  const summary = useMemo(() => summarizeResults(notes), [notes]);
+  const ngCount = useMemo(() => summary.bad + summary.miss, [summary.bad, summary.miss]);
+
+  const stopLoop = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+  }, []);
+
+  const stopAudioPlayback = useCallback(() => {
+    if (audioStartTimerRef.current) {
+      window.clearTimeout(audioStartTimerRef.current);
+      audioStartTimerRef.current = 0;
+    }
+    scheduledStartRef.current = 0;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current.muted = false;
+    }
+  }, []);
+
+  const pauseAudioPlayback = useCallback(() => {
+    if (audioStartTimerRef.current) {
+      window.clearTimeout(audioStartTimerRef.current);
+      audioStartTimerRef.current = 0;
+    }
+    scheduledStartRef.current = 0;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.muted = false;
+    }
+  }, []);
+
+  const getSfxContext = useCallback(async () => {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+
+    if (sfxCtxRef.current && sfxCtxRef.current.state === 'closed') {
+      sfxCtxRef.current = null;
+      sfxCompressorRef.current = null;
+      sfxMasterGainRef.current = null;
+      sfxReverbSendRef.current = null;
+      sfxNoiseBufferRef.current = null;
+    }
+
+    if (!sfxCtxRef.current) {
+      const ctx = new AudioCtx();
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -22;
+      compressor.knee.value = 18;
+      compressor.ratio.value = 3.2;
+      compressor.attack.value = 0.002;
+      compressor.release.value = 0.11;
+
+      const master = ctx.createGain();
+      master.gain.value = 0.85;
+      master.connect(compressor);
+
+      const reverb = ctx.createConvolver();
+      const reverbSeconds = 0.28;
+      const reverbBuffer = ctx.createBuffer(2, Math.floor(ctx.sampleRate * reverbSeconds), ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch += 1) {
+        const channel = reverbBuffer.getChannelData(ch);
+        for (let i = 0; i < channel.length; i += 1) {
+          const t = i / channel.length;
+          const decay = Math.pow(1 - t, 2.6);
+          channel[i] = (Math.random() * 2 - 1) * decay * 0.34;
+        }
+      }
+      reverb.buffer = reverbBuffer;
+
+      const reverbSend = ctx.createGain();
+      reverbSend.gain.value = 0.18;
+
+      reverbSend.connect(reverb);
+      reverb.connect(compressor);
+      compressor.connect(ctx.destination);
+
+      const noiseBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.16), ctx.sampleRate);
+      const channel = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < channel.length; i += 1) {
+        channel[i] = (Math.random() * 2 - 1) * (1 - i / channel.length);
+      }
+
+      sfxCtxRef.current = ctx;
+      sfxCompressorRef.current = compressor;
+      sfxMasterGainRef.current = master;
+      sfxReverbSendRef.current = reverbSend;
+      sfxNoiseBufferRef.current = noiseBuffer;
+    }
+
+    if (sfxCtxRef.current.state === 'suspended') {
+      try {
+        await sfxCtxRef.current.resume();
+      } catch (_) {
+        // Ignore resume failures.
+      }
+    }
+
+    return sfxCtxRef.current;
+  }, []);
+
+  const playInputSfx = useCallback(async (inputType) => {
+    const ctx = await getSfxContext();
+    const master = sfxMasterGainRef.current;
+    const reverbSend = sfxReverbSendRef.current;
+    const noiseBuffer = sfxNoiseBufferRef.current;
+    if (!ctx || !master) return;
+
+    const now = ctx.currentTime;
+    const connectVoice = (node, dry = 1, wet = 0.15) => {
+      const dryGain = ctx.createGain();
+      dryGain.gain.value = dry;
+      node.connect(dryGain);
+      dryGain.connect(master);
+      if (reverbSend && wet > 0) {
+        const wetGain = ctx.createGain();
+        wetGain.gain.value = wet;
+        node.connect(wetGain);
+        wetGain.connect(reverbSend);
+      }
+    };
+
+    const addModalResonance = (frequency, peakGain, decaySeconds, filterType = 'bandpass', qValue = 10) => {
+      if (!noiseBuffer) return;
+      const exciter = ctx.createBufferSource();
+      exciter.buffer = noiseBuffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = filterType;
+      filter.frequency.setValueAtTime(frequency, now);
+      filter.Q.setValueAtTime(filterType === 'bandpass' ? qValue : 0.7, now);
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, now);
+      env.gain.exponentialRampToValueAtTime(peakGain, now + 0.003);
+      env.gain.exponentialRampToValueAtTime(0.0001, now + decaySeconds);
+      exciter.connect(filter);
+      filter.connect(env);
+      connectVoice(env, 1, 0.12);
+      exciter.start(now);
+      exciter.stop(now + Math.min(0.12, decaySeconds + 0.03));
+    };
+
+    if (inputType === 'don') {
+      const subOsc = ctx.createOscillator();
+      const bodyOsc = ctx.createOscillator();
+      const toneOsc = ctx.createOscillator();
+      const donGain = ctx.createGain();
+      const donFilter = ctx.createBiquadFilter();
+      const donDrive = ctx.createWaveShaper();
+
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < curve.length; i += 1) {
+        const x = (i / (curve.length - 1)) * 2 - 1;
+        curve[i] = Math.tanh(x * 1.35);
+      }
+      donDrive.curve = curve;
+      donDrive.oversample = '4x';
+
+      donFilter.type = 'lowpass';
+      donFilter.frequency.setValueAtTime(1250, now);
+      donFilter.Q.setValueAtTime(0.65, now);
+
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(96, now);
+      subOsc.frequency.exponentialRampToValueAtTime(82, now + 0.2);
+
+      bodyOsc.type = 'sine';
+      bodyOsc.frequency.setValueAtTime(142, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(108, now + 0.17);
+
+      toneOsc.type = 'triangle';
+      toneOsc.frequency.setValueAtTime(212, now);
+      toneOsc.frequency.exponentialRampToValueAtTime(168, now + 0.12);
+
+      donGain.gain.setValueAtTime(0.0001, now);
+      donGain.gain.exponentialRampToValueAtTime(1.35, now + 0.003);
+      donGain.gain.exponentialRampToValueAtTime(0.62, now + 0.04);
+      donGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.23);
+
+      subOsc.connect(donGain);
+      bodyOsc.connect(donGain);
+      toneOsc.connect(donGain);
+      donGain.connect(donDrive);
+      donDrive.connect(donFilter);
+      connectVoice(donFilter, 1, 0.16);
+
+      subOsc.start(now);
+      bodyOsc.start(now);
+      toneOsc.start(now);
+      subOsc.stop(now + 0.24);
+      bodyOsc.stop(now + 0.21);
+      toneOsc.stop(now + 0.17);
+
+      const fundamental = 156 * (1 + (Math.random() - 0.5) * 0.03);
+      addModalResonance(fundamental, 0.42, 0.15, 'bandpass', 8);
+      addModalResonance(fundamental * 1.56, 0.24, 0.11, 'bandpass', 9);
+
+      if (noiseBuffer) {
+        const stick = ctx.createBufferSource();
+        stick.buffer = noiseBuffer;
+        const stickFilter = ctx.createBiquadFilter();
+        stickFilter.type = 'highpass';
+        stickFilter.frequency.setValueAtTime(1350, now);
+        const stickGain = ctx.createGain();
+        stickGain.gain.setValueAtTime(0.0001, now);
+        stickGain.gain.exponentialRampToValueAtTime(0.16, now + 0.0018);
+        stickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.013);
+        stick.connect(stickFilter);
+        stickFilter.connect(stickGain);
+        connectVoice(stickGain, 1, 0.02);
+        stick.start(now);
+        stick.stop(now + 0.016);
+      }
+    } else {
+      const woodOscA = ctx.createOscillator();
+      const woodOscB = ctx.createOscillator();
+      const woodGain = ctx.createGain();
+      const woodHP = ctx.createBiquadFilter();
+      const woodPeak = ctx.createBiquadFilter();
+
+      woodOscA.type = 'triangle';
+      woodOscB.type = 'sine';
+      woodOscA.frequency.setValueAtTime(1460, now);
+      woodOscA.frequency.exponentialRampToValueAtTime(1180, now + 0.045);
+      woodOscB.frequency.setValueAtTime(1980, now);
+      woodOscB.frequency.exponentialRampToValueAtTime(1560, now + 0.036);
+
+      woodHP.type = 'highpass';
+      woodHP.frequency.setValueAtTime(760, now);
+      woodPeak.type = 'peaking';
+      woodPeak.frequency.setValueAtTime(1880, now);
+      woodPeak.Q.setValueAtTime(0.95, now);
+      woodPeak.gain.setValueAtTime(3.7, now);
+
+      woodGain.gain.setValueAtTime(0.0001, now);
+      woodGain.gain.exponentialRampToValueAtTime(0.56, now + 0.0015);
+      woodGain.gain.exponentialRampToValueAtTime(0.15, now + 0.014);
+      woodGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.046);
+
+      woodOscA.connect(woodGain);
+      woodOscB.connect(woodGain);
+      woodGain.connect(woodHP);
+      woodHP.connect(woodPeak);
+      connectVoice(woodPeak, 1, 0.018);
+
+      woodOscA.start(now);
+      woodOscB.start(now);
+      woodOscA.stop(now + 0.045);
+      woodOscB.stop(now + 0.04);
+
+      const rimFund = 980 * (1 + (Math.random() - 0.5) * 0.028);
+      addModalResonance(rimFund, 0.2, 0.034, 'bandpass', 12);
+      addModalResonance(rimFund * 1.36, 0.12, 0.025, 'bandpass', 13);
+
+      if (noiseBuffer) {
+        const rimStick = ctx.createBufferSource();
+        rimStick.buffer = noiseBuffer;
+        const rimHP = ctx.createBiquadFilter();
+        const rimBP = ctx.createBiquadFilter();
+        rimHP.type = 'highpass';
+        rimHP.frequency.setValueAtTime(1400, now);
+        rimBP.type = 'bandpass';
+        rimBP.frequency.setValueAtTime(2480, now);
+        rimBP.Q.setValueAtTime(1.7, now);
+        const rimStickGain = ctx.createGain();
+        rimStickGain.gain.setValueAtTime(0.0001, now);
+        rimStickGain.gain.exponentialRampToValueAtTime(0.14, now + 0.0012);
+        rimStickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.0095);
+        rimStick.connect(rimHP);
+        rimHP.connect(rimBP);
+        rimBP.connect(rimStickGain);
+        connectVoice(rimStickGain, 1, 0.002);
+        rimStick.start(now);
+        rimStick.stop(now + 0.01);
+      }
+    }
+  }, [getSfxContext]);
+
+  const pushHitFlash = useCallback((inputType) => {
+    const ensureFxAnimation = () => {
+      if (hitFxRafRef.current) {
+        return;
+      }
+
+      const animateHitFx = () => {
+        const nowPerf = performance.now();
+        hitFxRef.current = hitFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_FLASH_MS);
+        judgeFxRef.current = judgeFxRef.current.filter((fx) => nowPerf - fx.time <= JUDGE_FEEDBACK_MS);
+        balloonFxRef.current = balloonFxRef.current.filter((fx) => nowPerf - fx.time <= BALLOON_POP_FX_MS);
+        hitNoteFxRef.current = hitNoteFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_NOTE_HOLD_MS + HIT_NOTE_FLY_MS);
+        setHitFxTick((prev) => prev + 1);
+        if (hitFxRef.current.length > 0 || judgeFxRef.current.length > 0 || balloonFxRef.current.length > 0 || hitNoteFxRef.current.length > 0) {
+          hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+        } else {
+          hitFxRafRef.current = 0;
+        }
+      };
+
+      hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+    };
+
+    const now = performance.now();
+    hitFxRef.current = [...hitFxRef.current.filter((fx) => now - fx.time <= HIT_FLASH_MS), {
+      time: now,
+      type: inputType
+    }];
+    setHitFxTick((prev) => prev + 1);
+    ensureFxAnimation();
+  }, []);
+
+  const pushJudgeFeedback = useCallback((result) => {
+    const configMap = {
+      perfect: { text: '可', fill: '#ffffff', stroke: '#2a3342', burstColor: [255, 255, 255] },
+      good: { text: '良', fill: '#ffd65c', stroke: '#2a3342', burstColor: [255, 218, 92] },
+      bad: { text: '不可', fill: '#6fb1ff', stroke: '#2a3342', burstColor: null }
+    };
+    const config = configMap[result];
+    if (!config) return;
+
+    const now = performance.now();
+    judgeFxRef.current = [...judgeFxRef.current.filter((fx) => now - fx.time <= JUDGE_FEEDBACK_MS), {
+      time: now,
+      particles: config.burstColor ? buildJudgeParticles() : [],
+      ...config
+    }];
+    setHitFxTick((prev) => prev + 1);
+
+    if (hitFxRafRef.current) {
+      return;
+    }
+
+    const animateHitFx = () => {
+      const nowPerf = performance.now();
+      hitFxRef.current = hitFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_FLASH_MS);
+      judgeFxRef.current = judgeFxRef.current.filter((fx) => nowPerf - fx.time <= JUDGE_FEEDBACK_MS);
+      balloonFxRef.current = balloonFxRef.current.filter((fx) => nowPerf - fx.time <= BALLOON_POP_FX_MS);
+      hitNoteFxRef.current = hitNoteFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_NOTE_HOLD_MS + HIT_NOTE_FLY_MS);
+      setHitFxTick((prev) => prev + 1);
+      if (hitFxRef.current.length > 0 || judgeFxRef.current.length > 0 || balloonFxRef.current.length > 0 || hitNoteFxRef.current.length > 0) {
+        hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+      } else {
+        hitFxRafRef.current = 0;
+      }
+    };
+    hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+  }, []);
+
+  const pushRollComboFeedback = useCallback((nextCount) => {
+    const now = performance.now();
+    judgeFxRef.current = [...judgeFxRef.current.filter((fx) => now - fx.time <= JUDGE_FEEDBACK_MS && !fx.isRollCombo), {
+      time: now,
+      text: String(nextCount),
+      fill: '#ffb66b',
+      stroke: '#2a3342',
+      burstColor: null,
+      particles: [],
+      fontSize: 40,
+      isRollCombo: true
+    }];
+    setHitFxTick((prev) => prev + 1);
+
+    if (hitFxRafRef.current) {
+      return;
+    }
+
+    const animateHitFx = () => {
+      const nowPerf = performance.now();
+      hitFxRef.current = hitFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_FLASH_MS);
+      judgeFxRef.current = judgeFxRef.current.filter((fx) => nowPerf - fx.time <= JUDGE_FEEDBACK_MS);
+      balloonFxRef.current = balloonFxRef.current.filter((fx) => nowPerf - fx.time <= BALLOON_POP_FX_MS);
+      hitNoteFxRef.current = hitNoteFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_NOTE_HOLD_MS + HIT_NOTE_FLY_MS);
+      setHitFxTick((prev) => prev + 1);
+      if (hitFxRef.current.length > 0 || judgeFxRef.current.length > 0 || balloonFxRef.current.length > 0 || hitNoteFxRef.current.length > 0) {
+        hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+      } else {
+        hitFxRafRef.current = 0;
+      }
+    };
+    hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+  }, []);
+
+  const pushHitNoteFx = useCallback((note) => {
+    const now = performance.now();
+    const sideJitter = (Math.random() - 0.5) * 18;
+    hitNoteFxRef.current = [
+      ...hitNoteFxRef.current.filter((fx) => now - fx.time <= HIT_NOTE_HOLD_MS + HIT_NOTE_FLY_MS),
+      {
+        time: now,
+        type: note.type,
+        isBig: note.isBig,
+        sideJitter
+      }
+    ];
+    setHitFxTick((prev) => prev + 1);
+
+    if (hitFxRafRef.current) {
+      return;
+    }
+
+    const animateHitFx = () => {
+      const nowPerf = performance.now();
+      hitFxRef.current = hitFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_FLASH_MS);
+      judgeFxRef.current = judgeFxRef.current.filter((fx) => nowPerf - fx.time <= JUDGE_FEEDBACK_MS);
+      balloonFxRef.current = balloonFxRef.current.filter((fx) => nowPerf - fx.time <= BALLOON_POP_FX_MS);
+      hitNoteFxRef.current = hitNoteFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_NOTE_HOLD_MS + HIT_NOTE_FLY_MS);
+      setHitFxTick((prev) => prev + 1);
+      if (hitFxRef.current.length > 0 || judgeFxRef.current.length > 0 || balloonFxRef.current.length > 0 || hitNoteFxRef.current.length > 0) {
+        hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+      } else {
+        hitFxRafRef.current = 0;
+      }
+    };
+    hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+  }, []);
+
+  const pushBalloonBurst = useCallback(() => {
+    const now = performance.now();
+    const particles = Array.from({ length: 22 }, (_, idx) => {
+      const angle = (Math.PI * 2 * idx) / 22 + (Math.random() - 0.5) * 0.16;
+      return {
+        angle,
+        speed: 300 + Math.random() * 260,
+        radius: 2.8 + Math.random() * 3.2
+      };
+    });
+
+    balloonFxRef.current = [...balloonFxRef.current.filter((fx) => now - fx.time <= BALLOON_POP_FX_MS), {
+      time: now,
+      particles
+    }];
+    setHitFxTick((prev) => prev + 1);
+
+    if (hitFxRafRef.current) {
+      return;
+    }
+
+    const animateHitFx = () => {
+      const nowPerf = performance.now();
+      hitFxRef.current = hitFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_FLASH_MS);
+      judgeFxRef.current = judgeFxRef.current.filter((fx) => nowPerf - fx.time <= JUDGE_FEEDBACK_MS);
+      balloonFxRef.current = balloonFxRef.current.filter((fx) => nowPerf - fx.time <= BALLOON_POP_FX_MS);
+      hitNoteFxRef.current = hitNoteFxRef.current.filter((fx) => nowPerf - fx.time <= HIT_NOTE_HOLD_MS + HIT_NOTE_FLY_MS);
+      setHitFxTick((prev) => prev + 1);
+      if (hitFxRef.current.length > 0 || judgeFxRef.current.length > 0 || balloonFxRef.current.length > 0 || hitNoteFxRef.current.length > 0) {
+        hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+      } else {
+        hitFxRafRef.current = 0;
+      }
+    };
+    hitFxRafRef.current = requestAnimationFrame(animateHitFx);
+  }, []);
+
+  const replaceAudioObjectUrl = useCallback((nextUrl) => {
+    setAudioObjectUrl((prev) => {
+      if (prev && prev !== nextUrl) {
+        URL.revokeObjectURL(prev);
+      }
+      return nextUrl;
+    });
+  }, []);
+
+  const resetPlayback = useCallback(() => {
+    stopLoop();
+    stopAudioPlayback();
+    hitFxRef.current = [];
+    judgeFxRef.current = [];
+    balloonFxRef.current = [];
+    hitNoteFxRef.current = [];
+    touchGuidePulseRef.current = [];
+    setIsPlaying(false);
+    setIsPaused(false);
+    setNowMs(-PRE_ROLL_MS);
+    pausedAtMsRef.current = -PRE_ROLL_MS;
+    missIgnoreBeforeMsRef.current = -Infinity;
+    suppressNotesBeforeMsRef.current = -Infinity;
+    hasUsedBarSeekRef.current = false;
+    setNotes((prev) => prev.map((note) => ({ ...note, judged: false, result: null, delta: null })));
+    setRollHitCounts({});
+    setRollBalloonHits(0);
+    setStreakHits(0);
+    setBalloons((prev) => prev.map((balloon) => ({
+      ...balloon,
+      remainingHits: balloon.requiredHits,
+      popped: false,
+      pulseAtMs: null
+    })));
+    setHitFxTick((prev) => prev + 1);
+    setStatusText('已重置，点击开始进行练习。');
+  }, [stopLoop, stopAudioPlayback]);
+
+  const rebuildTimelineByBranch = useCallback((baseChart, selectedBranch) => {
+    const resolvedChart = resolveChartByBranch(baseChart, selectedBranch);
+    if (!resolvedChart) {
+      setNotes([]);
+      setBarLines([]);
+      setRolls([]);
+      setRollHitCounts({});
+      setRollBalloonHits(0);
+      setStreakHits(0);
+      setBalloons([]);
+      setDurationMs(0);
+      setScrollPxPerMs(DEFAULT_NOTE_SCROLL_PX_PER_MS);
+      setAudioSyncOffsetMs(0);
+      setIsPaused(false);
+      pausedAtMsRef.current = -PRE_ROLL_MS;
+      missIgnoreBeforeMsRef.current = -Infinity;
+      suppressNotesBeforeMsRef.current = -Infinity;
+      hasUsedBarSeekRef.current = false;
+      return;
+    }
+
+    const baseTimeline = buildTimeline(resolvedChart, chartStartOffsetMs);
+    const { timeline, audioSyncOffsetMs: nextAudioSyncOffsetMs } = resolveTimelineAudioSync(baseTimeline);
+    setNotes(timeline.notes || []);
+    setBarLines(timeline.barLines || []);
+    setRolls(timeline.rolls || []);
+    setRollHitCounts({});
+    setRollBalloonHits(0);
+    setStreakHits(0);
+    setBalloons(timeline.balloons || []);
+    setDurationMs(timeline.durationMs || 0);
+    setScrollPxPerMs(computeScrollPxPerMsByBpm(getChartReferenceBpm(resolvedChart)));
+    setAudioSyncOffsetMs(nextAudioSyncOffsetMs);
+    setNowMs(-PRE_ROLL_MS);
+    setIsPaused(false);
+    pausedAtMsRef.current = -PRE_ROLL_MS;
+    missIgnoreBeforeMsRef.current = -Infinity;
+    suppressNotesBeforeMsRef.current = -Infinity;
+    hasUsedBarSeekRef.current = false;
+  }, [chartStartOffsetMs]);
+
+  const getCurrentChartTimeMs = useCallback(() => {
+    const nowPerf = performance.now();
+    let current = nowPerf - playStartRef.current + audioSyncOffsetMs;
+
+    if (audioRef.current && audioObjectUrl) {
+      // Keep using the pre-roll clock until the audio handoff timer finishes.
+      if (scheduledStartRef.current) {
+        current = nowPerf - scheduledStartRef.current + audioSyncOffsetMs;
+      } else if (!audioRef.current.paused && Number.isFinite(audioRef.current.currentTime)) {
+        current = audioRef.current.currentTime * 1000 + audioSyncOffsetMs;
+      }
+    }
+
+    return current;
+  }, [audioObjectUrl, audioSyncOffsetMs]);
+
+  const runFrame = useCallback(() => {
+    const current = getCurrentChartTimeMs();
+    const now = performance.now();
+    hitFxRef.current = hitFxRef.current.filter((fx) => now - fx.time <= HIT_FLASH_MS);
+    judgeFxRef.current = judgeFxRef.current.filter((fx) => now - fx.time <= JUDGE_FEEDBACK_MS);
+    balloonFxRef.current = balloonFxRef.current.filter((fx) => now - fx.time <= BALLOON_POP_FX_MS);
+    hitNoteFxRef.current = hitNoteFxRef.current.filter((fx) => now - fx.time <= HIT_NOTE_HOLD_MS + HIT_NOTE_FLY_MS);
+    setNowMs(current);
+
+    setNotes((prev) => {
+      const ignoreBeforeMs = Math.max(missIgnoreBeforeMsRef.current, suppressNotesBeforeMsRef.current);
+      const { changed, next, missedCount } = markExpiredMisses(prev, current, ignoreBeforeMs);
+      if (missedCount > 0) {
+        setStreakHits(0);
+      }
+      return changed ? next : prev;
+    });
+
+    if (current > durationMs + BAD_WINDOW + 400) {
+      setIsPlaying(false);
+      setIsPaused(false);
+      setStatusText('练习结束。可以重置后再次开始。');
+      stopLoop();
+      stopAudioPlayback();
+      return;
+    }
+
+    rafRef.current = requestAnimationFrame(runFrame);
+  }, [durationMs, stopLoop, stopAudioPlayback, getCurrentChartTimeMs]);
+
+  const startPlayback = useCallback(() => {
+    if (!notes.length) {
+      setStatusText('请先导入一个可解析的 TJA。');
+      return;
+    }
+    stopLoop();
+    stopAudioPlayback();
+    const scheduledStart = performance.now() + PRE_ROLL_MS;
+    scheduledStartRef.current = scheduledStart;
+    playStartRef.current = scheduledStart;
+    setIsPlaying(true);
+    setIsPaused(false);
+    setRollBalloonHits(0);
+    setStreakHits(0);
+    pausedAtMsRef.current = -PRE_ROLL_MS;
+    pendingResetAfterSeekRef.current = false;
+    missIgnoreBeforeMsRef.current = -Infinity;
+    suppressNotesBeforeMsRef.current = -Infinity;
+    hasUsedBarSeekRef.current = false;
+    setStatusText('开始练习：F/J=咚，D/K=咔。');
+    void getSfxContext();
+    if (audioRef.current && audioObjectUrl) {
+      audioRef.current.src = audioObjectUrl;
+
+      if (audioMimeType && !audioRef.current.canPlayType(audioMimeType)) {
+        setStatusText(`当前浏览器可能不支持该音频格式（${audioMimeType}）。`);
+      }
+
+      audioRef.current.currentTime = 0;
+      audioRef.current.muted = true;
+      audioRef.current.play().then(() => {
+        audioStartTimerRef.current = window.setTimeout(() => {
+          if (!audioRef.current) return;
+          // Keep the gesture-unlocked playback session; restart from zero at pre-roll boundary.
+          audioRef.current.currentTime = 0;
+          audioRef.current.muted = false;
+          // Use boundary time as fallback anchor when audio clock is temporarily unavailable.
+          playStartRef.current = performance.now();
+          scheduledStartRef.current = 0;
+        }, PRE_ROLL_MS);
+      }).catch(() => {
+        setStatusText('音频播放被浏览器拦截，请再次点击“开始”重试。');
+      });
+    }
+    rafRef.current = requestAnimationFrame(runFrame);
+  }, [notes.length, runFrame, stopLoop, stopAudioPlayback, audioObjectUrl, audioMimeType, getSfxContext]);
+
+  const pausePlayback = useCallback(() => {
+    if (!isPlaying) return;
+    const current = getCurrentChartTimeMs();
+    pausedAtMsRef.current = current;
+    setNowMs(current);
+    setIsPlaying(false);
+    setIsPaused(true);
+    stopLoop();
+    pauseAudioPlayback();
+    setStatusText('已暂停。');
+  }, [isPlaying, getCurrentChartTimeMs, stopLoop, pauseAudioPlayback]);
+
+  const resumePlayback = useCallback(() => {
+    if (!isPaused) return;
+    let resumeFromMs = pausedAtMsRef.current;
+    let shouldResetFromFirstBar = false;
+
+    if (hasUsedBarSeekRef.current && notes.length) {
+      const barTimes = [
+        chartStartOffsetMs,
+        ...(barLines || []).map((barLine) => barLine.timeMs)
+      ]
+        .filter((timeMs) => Number.isFinite(timeMs))
+        .sort((a, b) => a - b)
+        .filter((timeMs, idx, arr) => idx === 0 || Math.abs(timeMs - arr[idx - 1]) > 0.5);
+
+      if (barTimes.length) {
+        const firstBarStart = barTimes[0];
+        let currentBarStartIndex = 0;
+        for (let i = 0; i < barTimes.length; i += 1) {
+          if (barTimes[i] <= resumeFromMs + 1) {
+            currentBarStartIndex = i;
+          } else {
+            break;
+          }
+        }
+
+        const rewindIndex = Math.max(0, currentBarStartIndex - 1);
+        const rewindTarget = barTimes[rewindIndex];
+        const prepEnd = barTimes[rewindIndex + 1] ?? rewindTarget;
+        suppressNotesBeforeMsRef.current = prepEnd > rewindTarget + 0.5 ? prepEnd : -Infinity;
+
+        shouldResetFromFirstBar = Math.abs(rewindTarget - firstBarStart) <= 0.5;
+        if (shouldResetFromFirstBar) {
+          // Returning to the first bar from pause is treated as a full run reset.
+          pendingResetAfterSeekRef.current = true;
+          suppressNotesBeforeMsRef.current = -Infinity;
+          missIgnoreBeforeMsRef.current = -Infinity;
+        }
+
+        if (!shouldResetFromFirstBar && Math.abs(rewindTarget - resumeFromMs) > 0.5) {
+          pendingResetAfterSeekRef.current = true;
+        }
+
+        resumeFromMs = rewindTarget;
+        pausedAtMsRef.current = rewindTarget;
+        setNowMs(rewindTarget);
+      }
+    }
+
+    if (shouldResetFromFirstBar) {
+      hasUsedBarSeekRef.current = false;
+      startPlayback();
+      return;
+    }
+
+    hasUsedBarSeekRef.current = false;
+
+    if (pendingResetAfterSeekRef.current) {
+      setNotes((prev) => prev.map((note) => ({ ...note, judged: false, result: null, delta: null })));
+      setRollHitCounts({});
+      setRollBalloonHits(0);
+      setStreakHits(0);
+      setBalloons((prev) => prev.map((balloon) => ({
+        ...balloon,
+        remainingHits: balloon.requiredHits,
+        popped: false,
+        pulseAtMs: null
+      })));
+      hitFxRef.current = [];
+      judgeFxRef.current = [];
+      balloonFxRef.current = [];
+      hitNoteFxRef.current = [];
+      touchGuidePulseRef.current = [];
+      setHitFxTick((prev) => prev + 1);
+      pendingResetAfterSeekRef.current = false;
+    }
+
+    playStartRef.current = performance.now() - (resumeFromMs - audioSyncOffsetMs);
+    scheduledStartRef.current = 0;
+
+    if (audioRef.current && audioObjectUrl) {
+      const nextAudioTime = Math.max(0, (resumeFromMs - audioSyncOffsetMs) / 1000);
+      audioRef.current.currentTime = nextAudioTime;
+      audioRef.current.muted = false;
+      audioRef.current.play().catch(() => {
+        setStatusText('音频播放被浏览器拦截，请再次点击“继续”重试。');
+      });
+    }
+
+    setIsPaused(false);
+    setIsPlaying(true);
+    setStatusText('继续播放。');
+    rafRef.current = requestAnimationFrame(runFrame);
+  }, [isPaused, notes.length, chartStartOffsetMs, barLines, audioObjectUrl, audioSyncOffsetMs, runFrame, startPlayback]);
+
+  const seekToChartTime = useCallback((targetMs) => {
+    if (!Number.isFinite(targetMs)) return;
+
+    const clamped = Math.max(chartStartOffsetMs, Math.min(durationMs, targetMs));
+    setNowMs(clamped);
+    pausedAtMsRef.current = clamped;
+
+    if (audioRef.current && audioObjectUrl) {
+      const nextAudioTime = Math.max(0, (clamped - audioSyncOffsetMs) / 1000);
+      audioRef.current.currentTime = nextAudioTime;
+    }
+
+    if (isPlaying) {
+      playStartRef.current = performance.now() - (clamped - audioSyncOffsetMs);
+      scheduledStartRef.current = 0;
+    }
+  }, [audioObjectUrl, audioSyncOffsetMs, chartStartOffsetMs, durationMs, isPlaying]);
+
+  const seekByBarLine = useCallback((direction) => {
+    if (!notes.length || !isPaused) return;
+    hasUsedBarSeekRef.current = true;
+    const step = direction >= 0 ? 1 : -1;
+    const barTimes = [
+      chartStartOffsetMs,
+      ...(barLines || []).map((barLine) => barLine.timeMs)
+    ]
+      .filter((timeMs) => Number.isFinite(timeMs))
+      .sort((a, b) => a - b)
+      .filter((timeMs, idx, arr) => idx === 0 || Math.abs(timeMs - arr[idx - 1]) > 0.5);
+
+    if (!barTimes.length) {
+      seekToChartTime(step > 0 ? durationMs : chartStartOffsetMs);
+      return;
+    }
+
+    const current = isPlaying
+      ? getCurrentChartTimeMs()
+      : (isPaused ? pausedAtMsRef.current : nowMs);
+
+    const currentBarStartIndex = (() => {
+      let idx = 0;
+      for (let i = 0; i < barTimes.length; i += 1) {
+        if (barTimes[i] <= current + 1) {
+          idx = i;
+        } else {
+          break;
+        }
+      }
+      return idx;
+    })();
+
+    let target;
+    if (step > 0) {
+      target = barTimes.find((timeMs) => timeMs > current + 1) ?? barTimes[barTimes.length - 1];
+    } else {
+      const rewindIndex = Math.max(0, currentBarStartIndex - 1);
+      target = barTimes[rewindIndex];
+    }
+    // While paused seeking, always show the target bar notes; prep suppression is only for resume rollback.
+    suppressNotesBeforeMsRef.current = -Infinity;
+
+    if (target > current + 0.5) {
+      missIgnoreBeforeMsRef.current = Math.max(missIgnoreBeforeMsRef.current, target);
+    }
+
+    const hasJumped = Math.abs(target - current) > 0.5;
+    if (hasJumped) {
+      pendingResetAfterSeekRef.current = true;
+    }
+
+    // Rewinding while paused should immediately show notes again on the lane.
+    if (step < 0 && isPaused && hasJumped) {
+      setNotes((prev) => prev.map((note) => ({ ...note, judged: false, result: null, delta: null })));
+      setRollHitCounts({});
+      setRollBalloonHits(0);
+      setStreakHits(0);
+      setBalloons((prev) => prev.map((balloon) => ({
+        ...balloon,
+        remainingHits: balloon.requiredHits,
+        popped: false,
+        pulseAtMs: null
+      })));
+      hitFxRef.current = [];
+      judgeFxRef.current = [];
+      balloonFxRef.current = [];
+      hitNoteFxRef.current = [];
+      touchGuidePulseRef.current = [];
+      setHitFxTick((prev) => prev + 1);
+      pendingResetAfterSeekRef.current = false;
+    }
+
+    seekToChartTime(target);
+    if (isPaused) {
+      setStatusText(`已暂停：已跳转到${step > 0 ? '下一' : '上一'}小节。`);
+    }
+  }, [notes.length, chartStartOffsetMs, barLines, durationMs, isPlaying, isPaused, getCurrentChartTimeMs, nowMs, seekToChartTime]);
+
+  const handleInput = useCallback((inputType) => {
+    if (!isPlaying) return;
+    const current = getCurrentChartTimeMs();
+    if (current < suppressNotesBeforeMsRef.current) return;
+
+    if (inputType === 'don') {
+      const activeIndex = balloons.findIndex((balloon) =>
+        !balloon.popped && current >= balloon.timeMs && current <= balloon.endMs && balloon.remainingHits > 0
+      );
+      if (activeIndex >= 0) {
+        const currentBalloon = balloons[activeIndex];
+        const updated = [...balloons];
+        const nextHits = Math.max(0, currentBalloon.remainingHits - 1);
+        updated[activeIndex] = {
+          ...currentBalloon,
+          remainingHits: nextHits,
+          popped: nextHits <= 0,
+          pulseAtMs: current
+        };
+        setBalloons(updated);
+        setRollBalloonHits((prev) => prev + 1);
+        if (nextHits <= 0) {
+          pushBalloonBurst();
+        }
+      }
+    }
+
+    const activeRoll = rolls.find((roll) => current >= roll.startMs && current <= roll.endMs);
+    if (activeRoll) {
+      setRollHitCounts((prev) => ({
+        ...prev,
+        [activeRoll.id]: (prev[activeRoll.id] || 0) + 1
+      }));
+      setRollBalloonHits((prev) => {
+        const nextCount = prev + 1;
+        pushRollComboFeedback(nextCount);
+        return nextCount;
+      });
+    }
+
+    const index = findBestCandidate(notes, current, inputType, suppressNotesBeforeMsRef.current);
+    if (index < 0) return;
+
+    const note = notes[index];
+    const delta = current - note.timeMs;
+    const result = getHitResult(Math.abs(delta));
+    if (!result) return;
+
+    if (result === 'perfect' || result === 'good') {
+      setStreakHits((prev) => prev + 1);
+    } else {
+      setStreakHits(0);
+    }
+
+    const next = [...notes];
+    next[index] = {
+      ...note,
+      judged: true,
+      result,
+      delta
+    };
+    setNotes(next);
+    if (result === 'perfect' || result === 'good') {
+      pushHitNoteFx(note);
+    }
+    pushJudgeFeedback(result);
+  }, [isPlaying, getCurrentChartTimeMs, notes, pushJudgeFeedback, pushRollComboFeedback, pushHitNoteFx, balloons, pushBalloonBurst, rolls]);
+
+  const getTouchArcGeometry = useCallback((zoneWidth, zoneHeight) => {
+    const width = Math.max(1, zoneWidth);
+    const height = Math.max(1, zoneHeight);
+    const arcRadius = width * 0.92;
+    const arcY = height * 0.3;
+    return {
+      centerX: width / 2,
+      centerY: arcY + arcRadius,
+      radius: arcRadius
+    };
+  }, []);
+
+  const triggerInputFeedback = useCallback((inputType) => {
+    const now = performance.now();
+    touchGuidePulseRef.current = [
+      ...touchGuidePulseRef.current.filter((pulse) => now - pulse.time <= TOUCH_GUIDE_VIBRATION_MS),
+      { time: now, type: inputType }
+    ];
+    pushHitFlash(inputType);
+    void playInputSfx(inputType);
+    handleInput(inputType);
+  }, [pushHitFlash, playInputSfx, handleInput]);
+
+  const handlePracticePointerDown = useCallback((event) => {
+    const frame = event.currentTarget;
+    if (!frame) return;
+    const frameRect = frame.getBoundingClientRect();
+    const localX = event.clientX - frameRect.left;
+    const localY = event.clientY - frameRect.top;
+
+    const touchCanvasRect = touchGuideCanvasRef.current?.getBoundingClientRect?.();
+    if (!touchCanvasRect) return;
+
+    const zoneOffsetX = touchCanvasRect.left - frameRect.left;
+    const zoneOffsetY = touchCanvasRect.top - frameRect.top;
+    const zoneX = localX - zoneOffsetX;
+    const zoneY = localY - zoneOffsetY;
+
+    const arc = getTouchArcGeometry(touchCanvasRect.width, touchCanvasRect.height);
+    const dx = zoneX - arc.centerX;
+    let arcY = arc.centerY;
+    if (Math.abs(dx) <= arc.radius) {
+      arcY = arc.centerY - Math.sqrt(arc.radius * arc.radius - dx * dx);
+    }
+
+    const isDon = zoneY >= arcY;
+
+    event.preventDefault();
+    triggerInputFeedback(isDon ? 'don' : 'ka');
+  }, [getTouchArcGeometry, triggerInputFeedback]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const key = String(event.key || '').toLowerCase();
+      if (DON_KEYS.has(key)) {
+        event.preventDefault();
+        triggerInputFeedback('don');
+      } else if (KA_KEYS.has(key)) {
+        event.preventDefault();
+        triggerInputFeedback('ka');
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [triggerInputFeedback]);
+
+  useEffect(() => {
+    if (!isPlaying && !isPaused) {
+      stopLoop();
+      stopAudioPlayback();
+    }
+  }, [isPlaying, isPaused, stopLoop, stopAudioPlayback]);
+
+  useEffect(() => {
+    return () => {
+      stopLoop();
+      stopAudioPlayback();
+      replaceAudioObjectUrl('');
+      if (hitFxRafRef.current) {
+        cancelAnimationFrame(hitFxRafRef.current);
+        hitFxRafRef.current = 0;
+      }
+      if (sfxCtxRef.current) {
+        sfxCtxRef.current.close().catch(() => {});
+        sfxCtxRef.current = null;
+        sfxCompressorRef.current = null;
+        sfxMasterGainRef.current = null;
+        sfxReverbSendRef.current = null;
+        sfxNoiseBufferRef.current = null;
+      }
+    };
+  }, [stopLoop, stopAudioPlayback, replaceAudioObjectUrl]);
+
+  useEffect(() => {
+    if (!baseChartForBranch) return;
+    stopLoop();
+    stopAudioPlayback();
+    setIsPlaying(false);
+    setIsPaused(false);
+    rebuildTimelineByBranch(baseChartForBranch, branchSelection);
+  }, [baseChartForBranch, branchSelection, rebuildTimelineByBranch, stopLoop, stopAudioPlayback]);
+
+  const applyImportedTjaText = useCallback((tjaText, fileLabel, audioBlob = null) => {
+    const parsed = parseTJA(tjaText);
+    const mainCourse = resolveMainCourse(parsed);
+    if (!mainCourse) {
+      throw new Error('未解析到任何有效难度。');
+    }
+
+    const playableChart = resolvePlayableChart(mainCourse.chart);
+    if (!playableChart) {
+      throw new Error('未找到可游玩的单人谱面。');
+    }
+
+    const branchOptions = getBranchOptions(playableChart);
+    const initialBranchSelection = getPreferredBranchSelection(branchOptions);
+    const resolvedChart = resolveChartByBranch(playableChart, initialBranchSelection);
+    const headerOffsetSec = Number.parseFloat(String(playableChart.headers?.OFFSET || '0'));
+    const resolvedChartStartOffsetMs = Number.isFinite(headerOffsetSec) ? -headerOffsetSec * 1000 : 0;
+    const baseTimeline = buildTimeline(resolvedChart, resolvedChartStartOffsetMs);
+    const { timeline, audioSyncOffsetMs: nextAudioSyncOffsetMs } = resolveTimelineAudioSync(baseTimeline);
+    if (!timeline.notes.length) {
+      throw new Error('该谱面没有可判定音符。');
+    }
+
+    const audioUrl = audioBlob ? URL.createObjectURL(audioBlob) : '';
+    replaceAudioObjectUrl(audioUrl);
+    setAudioMimeType(audioBlob?.type || '');
+
+    setSongTitle(playableChart.title || fileLabel.replace(/\.tja$/i, ''));
+    setDifficultyText(mainCourse.normalizedKey.toUpperCase());
+    setBaseChartForBranch(playableChart);
+    setAvailableBranches(branchOptions);
+    setBranchSelection(initialBranchSelection);
+    setChartStartOffsetMs(resolvedChartStartOffsetMs);
+    setAudioSyncOffsetMs(nextAudioSyncOffsetMs);
+    setNotes(timeline.notes);
+    setBarLines(timeline.barLines || []);
+    setRolls(timeline.rolls || []);
+    setBalloons(timeline.balloons || []);
+    setRollBalloonHits(0);
+    setStreakHits(0);
+    setDurationMs(timeline.durationMs);
+    setScrollPxPerMs(computeScrollPxPerMsByBpm(getChartReferenceBpm(resolvedChart)));
+    setNowMs(-PRE_ROLL_MS);
+
+    const audioHint = audioBlob ? '，已加载音频' : '，未找到音频';
+    setStatusText(`导入成功：${timeline.notes.length} 个可判定音符${audioHint}。点击开始即可游玩。`);
+  }, [replaceAudioObjectUrl]);
+
+  const importFromZip = useCallback(async (zipFile) => {
+    const zip = await JSZip.loadAsync(await zipFile.arrayBuffer());
+    const allFiles = Object.values(zip.files).filter((entry) => !entry.dir);
+    const tjaEntries = allFiles.filter((entry) => normalizePath(entry.name).toLowerCase().endsWith('.tja'));
+    if (!tjaEntries.length) {
+      throw new Error('ZIP 中未找到 .tja 文件。');
+    }
+
+    const selectedTja = tjaEntries[0];
+    const tjaBytes = await selectedTja.async('uint8array');
+    const tjaText = decodeTjaBytes(tjaBytes);
+
+    const fileMap = new Map();
+    for (const entry of allFiles) {
+      fileMap.set(normalizePath(entry.name).toLowerCase(), entry);
+    }
+
+    const wavePath = extractWavePath(tjaText);
+    let audioEntry = null;
+    if (wavePath) {
+      const resolvedPath = joinPath(pathDir(selectedTja.name), wavePath).toLowerCase();
+      audioEntry = fileMap.get(resolvedPath) || null;
+    }
+
+    if (!audioEntry) {
+      audioEntry = allFiles.find((entry) => isAudioPath(entry.name)) || null;
+    }
+
+    let audioBlob = null;
+    if (audioEntry) {
+      const bytes = await audioEntry.async('uint8array');
+      audioBlob = new Blob([bytes], { type: getAudioMimeType(audioEntry.name) });
+    }
+    applyImportedTjaText(tjaText, pathBase(selectedTja.name), audioBlob);
+  }, [applyImportedTjaText]);
+
+  const importLocalCharts = useCallback(async (event) => {
+    const file = Array.from(event.target.files || [])[0];
+    event.target.value = '';
+
+    if (!file) {
+      setStatusText('请选择 .tja 或 .zip 文件。');
+      return;
+    }
+
+    stopLoop();
+    stopAudioPlayback();
+    setIsPlaying(false);
+    setIsPaused(false);
+
+    try {
+      const lowerName = file.name.toLowerCase();
+      if (lowerName.endsWith('.zip')) {
+        await importFromZip(file);
+      } else if (lowerName.endsWith('.tja')) {
+        const text = await readText(file);
+        applyImportedTjaText(text, file.name, null);
+      } else {
+        throw new Error('仅支持 .tja 或 .zip 文件。');
+      }
+    } catch (error) {
+      setStatusText(`导入失败：${error?.message || String(error)}`);
+      setBaseChartForBranch(null);
+      setAvailableBranches([]);
+      setBranchSelection('master');
+      setChartStartOffsetMs(0);
+      setAudioSyncOffsetMs(0);
+      setNotes([]);
+      setBarLines([]);
+      setRolls([]);
+      setBalloons([]);
+      setRollBalloonHits(0);
+      setStreakHits(0);
+      setDurationMs(0);
+      setScrollPxPerMs(DEFAULT_NOTE_SCROLL_PX_PER_MS);
+      replaceAudioObjectUrl('');
+      setAudioMimeType('');
+      setSongTitle('');
+      setDifficultyText('');
+      setIsPaused(false);
+      pausedAtMsRef.current = -PRE_ROLL_MS;
+      missIgnoreBeforeMsRef.current = -Infinity;
+      suppressNotesBeforeMsRef.current = -Infinity;
+      hasUsedBarSeekRef.current = false;
+    }
+  }, [stopLoop, stopAudioPlayback, importFromZip, applyImportedTjaText, replaceAudioObjectUrl]);
+
+  const visibleNotes = useMemo(() => {
+    return notes
+      .filter((note) => note.timeMs >= suppressNotesBeforeMsRef.current)
+      .filter((note) => !note.judged || note.result === 'miss')
+      .map((note) => {
+        const x = LANE_TARGET_X + (note.timeMs - nowMs) * scrollPxPerMs;
+        return {
+          ...note,
+          x
+        };
+      })
+      .filter((note) => note.x > -60 && note.x < 1800);
+  }, [notes, nowMs, scrollPxPerMs]);
+
+  const visibleBarLines = useMemo(() => {
+    return barLines
+      .map((barLine) => ({
+        ...barLine,
+        x: LANE_TARGET_X + (barLine.timeMs - nowMs) * scrollPxPerMs
+      }))
+      .filter((barLine) => barLine.x > -80 && barLine.x < 1920);
+  }, [barLines, nowMs, scrollPxPerMs]);
+
+  const visibleRolls = useMemo(() => {
+    return rolls
+      .map((roll) => {
+        const xStart = LANE_TARGET_X + (roll.startMs - nowMs) * scrollPxPerMs;
+        const xEnd = LANE_TARGET_X + (roll.endMs - nowMs) * scrollPxPerMs;
+        return {
+          ...roll,
+          xStart,
+          xEnd
+        };
+      })
+      .filter((roll) => roll.xEnd > -120 && roll.xStart < 1920);
+  }, [rolls, nowMs, scrollPxPerMs]);
+
+  const visibleBalloons = useMemo(() => {
+    return balloons
+      .map((balloon) => {
+        const isHoldingAtJudge = nowMs >= balloon.timeMs && nowMs <= balloon.endMs && !balloon.popped;
+        const approachX = nowMs > balloon.endMs
+          ? LANE_TARGET_X + (balloon.endMs - nowMs) * scrollPxPerMs
+          : LANE_TARGET_X + (balloon.timeMs - nowMs) * scrollPxPerMs;
+        const pulseElapsed = Number.isFinite(balloon.pulseAtMs) ? nowMs - balloon.pulseAtMs : Infinity;
+        const pulseScale = pulseElapsed >= 0 && pulseElapsed <= BALLOON_PULSE_MS
+          ? 1 + Math.sin((pulseElapsed / BALLOON_PULSE_MS) * Math.PI) * 0.18
+          : 1;
+        return {
+          ...balloon,
+          x: isHoldingAtJudge ? LANE_TARGET_X : approachX,
+          scale: pulseScale,
+          isHoldingAtJudge
+        };
+      })
+      .filter((balloon) => !balloon.popped && balloon.x > -220 && balloon.x < 1920);
+  }, [balloons, nowMs, scrollPxPerMs]);
+
+  const activeRollForDisplay = useMemo(() => {
+    return rolls.find((roll) => nowMs >= roll.startMs && nowMs <= roll.endMs + ROLL_COUNT_HOLD_MS) || null;
+  }, [rolls, nowMs]);
+
+  const scrollTheme = useMemo(() => {
+    if (!availableBranches.length) {
+      return BRANCH_SCROLL_THEME.normal;
+    }
+    return BRANCH_SCROLL_THEME[branchSelection] || BRANCH_SCROLL_THEME.normal;
+  }, [availableBranches.length, branchSelection]);
+
+  const drawLaneCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const width = canvas.clientWidth || 800;
+    const height = canvas.clientHeight || 220;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+    const renderWidth = Math.floor(width * dpr);
+    const renderHeight = Math.floor(height * dpr);
+    if (canvas.width !== renderWidth || canvas.height !== renderHeight) {
+      canvas.width = renderWidth;
+      canvas.height = renderHeight;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    const statusBarHeight = 66;
+    const progressAreaHeight = 24;
+    const baseLaneTop = statusBarHeight;
+    const baseLaneBottom = Math.max(baseLaneTop + 120, height - progressAreaHeight);
+    const baseLaneHeight = Math.max(120, baseLaneBottom - baseLaneTop);
+    const judgeXBase = Math.max(60, Math.min(width - 60, LANE_TARGET_X));
+    const baseOutlineWidth = 4;
+    const baseSmallRadius = NOTE_SMALL_RADIUS;
+    const baseBigRadius = Math.round((baseSmallRadius * 4) / 3 + baseOutlineWidth + 1);
+    const baseJudgeSmallRadius = baseSmallRadius;
+    const baseJudgeBigRadius = baseBigRadius;
+    const noteCoreScale = 0.93;
+    const baseLeftPanelPadding = Math.max(26, Math.floor(baseLaneHeight * 0.12));
+    const baseDesiredDrumOuterRadius = baseJudgeBigRadius + 14;
+    const baseRequiredPanelWidth = baseDesiredDrumOuterRadius * 2 + baseLeftPanelPadding * 2;
+    const baseMinPanelWidthByDrumCount = Math.ceil(baseDesiredDrumOuterRadius * 2 * 2.5);
+    const maxPanelWidth = Math.max(140, width - 180);
+    const rawDrumAreaRight = Math.min(
+      maxPanelWidth,
+      Math.max(120, judgeXBase - baseJudgeBigRadius - 24, baseRequiredPanelWidth, baseMinPanelWidthByDrumCount)
+    );
+    const laneFlyInRealWidth = 1800 - LANE_TARGET_X;
+    const stackOrangeAboveLane = width <= 760;
+    const rowWidthScale = stackOrangeAboveLane
+      ? Math.min(1, width / laneFlyInRealWidth)
+      : Math.min(1, width / (rawDrumAreaRight + laneFlyInRealWidth));
+    const laneHeightScale = rowWidthScale + (1 - rowWidthScale) * 0.20;
+    const topOrangeHeight = stackOrangeAboveLane
+      ? Math.max(52, Math.round(56 * laneHeightScale))
+      : 0;
+    const topOrangeDividerThickness = stackOrangeAboveLane ? 5 : 0;
+    const topOrangeUsableTop = baseLaneTop;
+    const topOrangeUsableHeight = stackOrangeAboveLane
+      ? Math.max(20, topOrangeHeight - topOrangeDividerThickness)
+      : 0;
+
+    const laneTop = baseLaneTop + topOrangeHeight;
+    const maxLaneHeight = Math.max(82, height - progressAreaHeight - laneTop);
+    const laneHeight = Math.min(baseLaneHeight * laneHeightScale, maxLaneHeight);
+    const laneBottom = laneTop + laneHeight;
+    const laneY = laneTop + Math.floor(laneHeight / 2);
+    const laneShrinkGap = Math.max(0, baseLaneBottom - laneBottom);
+    const frameWrap = canvas.parentElement;
+    if (frameWrap) {
+      frameWrap.style.setProperty('--practice-lane-shrink-gap', `${laneShrinkGap}px`);
+    }
+    const noteJudgeOutlineWidth = baseOutlineWidth * rowWidthScale;
+    const dynamicSmallRadius = baseSmallRadius * rowWidthScale;
+    const dynamicBigRadius = baseBigRadius * rowWidthScale;
+    const dynamicJudgeSmallRadius = dynamicSmallRadius;
+    const dynamicJudgeBigRadius = dynamicBigRadius;
+    const smallNoteWhiteRingWidth = dynamicSmallRadius * 0.11;
+    const smallNoteCoreRadius = (dynamicSmallRadius - noteJudgeOutlineWidth - smallNoteWhiteRingWidth) * noteCoreScale;
+    const leftPanelPadding = Math.max(12, Math.round(baseLeftPanelPadding * rowWidthScale));
+    const desiredDrumOuterRadius = dynamicJudgeBigRadius + Math.max(8, Math.round(14 * rowWidthScale));
+    const drumAreaRight = stackOrangeAboveLane ? 0 : rawDrumAreaRight * rowWidthScale;
+    const laneClipLeft = stackOrangeAboveLane ? 0 : Math.min(width - 1, drumAreaRight);
+    const laneDisplayWidth = laneFlyInRealWidth * rowWidthScale;
+    const shouldRenderRightMask = rowWidthScale >= 0.999 && width > laneClipLeft + laneFlyInRealWidth;
+    const rightMaskWidth = shouldRenderRightMask
+      ? Math.max(0, width - laneClipLeft - laneDisplayWidth)
+      : 0;
+    const laneClipRight = shouldRenderRightMask
+      ? laneClipLeft + laneDisplayWidth
+      : Math.min(width, laneClipLeft + laneDisplayWidth);
+    const rightMaskLeft = laneClipRight;
+    const laneShift = stackOrangeAboveLane ? 0 : drumAreaRight;
+    const judgeXBaseScaled = LANE_TARGET_X * rowWidthScale;
+    const judgeX = Math.max(
+      laneClipLeft + dynamicJudgeBigRadius + 8,
+      Math.min(laneClipRight - dynamicJudgeBigRadius - 8, judgeXBaseScaled + laneShift)
+    );
+    const drumVerticalPadding = stackOrangeAboveLane
+      ? Math.max(7, Math.round(9 * rowWidthScale))
+      : 0;
+    const minOuterRadius = Math.max(14, Math.round(36 * rowWidthScale));
+    const maxOuterRadiusByPanel = stackOrangeAboveLane
+      ? Math.max(Math.round(minOuterRadius * 0.75), Math.floor(topOrangeHeight * 0.44))
+      : Math.max(Math.round(minOuterRadius * 0.75), Math.floor((drumAreaRight - leftPanelPadding * 2) / 2));
+    const maxOuterRadiusByTopBand = stackOrangeAboveLane
+      ? Math.max(10, Math.floor(topOrangeUsableHeight / 2) - drumVerticalPadding)
+      : Number.POSITIVE_INFINITY;
+    const drumOuterRadius = stackOrangeAboveLane
+      ? Math.max(10, Math.min(desiredDrumOuterRadius * 0.9, maxOuterRadiusByPanel, maxOuterRadiusByTopBand))
+      : Math.max(minOuterRadius, Math.min(desiredDrumOuterRadius, maxOuterRadiusByPanel));
+    const minCenterX = leftPanelPadding + drumOuterRadius;
+    const maxCenterX = stackOrangeAboveLane
+      ? Math.max(minCenterX, width - leftPanelPadding - drumOuterRadius)
+      : Math.max(minCenterX, drumAreaRight - leftPanelPadding - drumOuterRadius);
+    const drumCenterX = stackOrangeAboveLane
+      ? Math.floor(Math.max(minCenterX, Math.min(width * 0.14, maxCenterX)))
+      : Math.floor(minCenterX + (maxCenterX - minCenterX) * 0.76);
+    const drumCenterY = stackOrangeAboveLane
+      ? topOrangeUsableTop + Math.floor(topOrangeUsableHeight / 2)
+      : laneY;
+    const minRimThickness = Math.max(3, Math.round(8 * rowWidthScale));
+    const drumRimThickness = Math.max(minRimThickness, Math.floor(drumOuterRadius * 0.16));
+    const minInnerRadius = Math.max(8, Math.round(22 * rowWidthScale));
+    const drumInnerRadius = Math.max(minInnerRadius, drumOuterRadius - drumRimThickness);
+
+    const nowPerf = performance.now();
+    const activeDonFx = hitFxRef.current.some((fx) => fx.type === 'don' && nowPerf - fx.time >= 0 && nowPerf - fx.time <= HIT_FLASH_MS);
+    const activeKaFx = hitFxRef.current.some((fx) => fx.type === 'ka' && nowPerf - fx.time >= 0 && nowPerf - fx.time <= HIT_FLASH_MS);
+    const progressRatio = durationMs > 0 ? Math.max(0, Math.min(1, nowMs / durationMs)) : 0;
+    const progressPercent = Math.round(progressRatio * 100);
+    const totalBars = notes.length ? Math.max(1, (barLines?.length || 0) + 1) : 0;
+    let currentBar = 0;
+    if (totalBars > 0) {
+      let passedBarLines = 0;
+      for (const barLine of barLines || []) {
+        if (nowMs >= barLine.timeMs) {
+          passedBarLines += 1;
+        } else {
+          break;
+        }
+      }
+      currentBar = Math.min(totalBars, Math.max(1, passedBarLines + 1));
+    }
+    const progressText = totalBars > 0
+      ? `${progressPercent}%  ${currentBar}/${totalBars} 小节`
+      : `${progressPercent}%  -/- 小节`;
+
+    ctx.fillStyle = '#b83a10';
+    if (stackOrangeAboveLane) {
+      ctx.fillRect(0, baseLaneTop, width, topOrangeHeight);
+      ctx.strokeStyle = '#242d3a';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(0, laneTop - 2.5);
+      ctx.lineTo(width, laneTop - 2.5);
+      ctx.stroke();
+    } else {
+      ctx.fillRect(0, laneTop, drumAreaRight, laneBottom - laneTop);
+      ctx.strokeStyle = '#242d3a';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(drumAreaRight - 2.5, laneTop);
+      ctx.lineTo(drumAreaRight - 2.5, laneBottom);
+      ctx.stroke();
+    }
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '900 18px "Microsoft YaHei", "Noto Sans SC", sans-serif';
+    ctx.fillStyle = '#ffe7cb';
+    if (stackOrangeAboveLane) {
+      const progressX = Math.min(width - 180, drumCenterX + drumOuterRadius + 12);
+      ctx.fillText(progressText, progressX, drumCenterY);
+    } else {
+      ctx.fillText(progressText, 12, laneBottom - 16);
+    }
+
+    ctx.fillStyle = scrollTheme.base;
+    ctx.fillRect(laneClipLeft, laneTop, Math.max(0, laneClipRight - laneClipLeft), laneBottom - laneTop);
+
+    if (scrollTheme.overlay && scrollTheme.overlay !== 'rgba(0, 0, 0, 0)') {
+      ctx.fillStyle = scrollTheme.overlay;
+      ctx.fillRect(laneClipLeft, laneTop, Math.max(0, laneClipRight - laneClipLeft), laneBottom - laneTop);
+    }
+
+    if (rightMaskWidth > 0) {
+      ctx.fillStyle = '#b83a10';
+      ctx.fillRect(rightMaskLeft, laneTop, width - rightMaskLeft, laneBottom - laneTop);
+
+      ctx.strokeStyle = '#242d3a';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(rightMaskLeft + 2.5, laneTop);
+      ctx.lineTo(rightMaskLeft + 2.5, laneBottom);
+      ctx.stroke();
+    }
+
+    // Draw status bar first so gameplay feedback can render above it.
+    ctx.fillStyle = '#1f2633';
+    ctx.fillRect(0, 0, width, statusBarHeight);
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '900 20px "Microsoft YaHei", "Noto Sans SC", sans-serif';
+    const statusItems = [
+      { text: `良 ${summary.good}`, color: '#ffd65c' },
+      { text: `可 ${summary.perfect}`, color: '#ffffff' },
+      { text: `不可 ${ngCount}`, color: '#6fb1ff' },
+      { text: `连打 ${rollBalloonHits}`, color: '#ffb66b' }
+    ];
+    let statusX = 16;
+    for (const item of statusItems) {
+      ctx.fillStyle = item.color;
+      ctx.fillText(item.text, statusX, statusBarHeight / 2);
+      statusX += ctx.measureText(item.text).width + 30;
+      if (statusX > width - 120) break;
+    }
+
+    if (stackOrangeAboveLane) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, baseLaneTop, width, topOrangeHeight);
+      ctx.clip();
+    }
+
+    if (activeKaFx) {
+      const kaGlow = ctx.createRadialGradient(drumCenterX, drumCenterY, drumInnerRadius * 0.8, drumCenterX, drumCenterY, drumOuterRadius * 1.08);
+      kaGlow.addColorStop(0, 'rgba(70, 170, 255, 0)');
+      kaGlow.addColorStop(0.62, 'rgba(70, 170, 255, 0.58)');
+      kaGlow.addColorStop(1, 'rgba(70, 170, 255, 0.08)');
+      ctx.fillStyle = kaGlow;
+      ctx.beginPath();
+      ctx.arc(drumCenterX, drumCenterY, drumOuterRadius * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const drumBaseWarmWhite = '#f2eddc';
+    const drumRimColor = activeKaFx ? '#4f9fff' : drumBaseWarmWhite;
+    const drumFaceColor = activeDonFx ? '#ff4e42' : drumBaseWarmWhite;
+
+    ctx.fillStyle = drumRimColor;
+    ctx.beginPath();
+    ctx.arc(drumCenterX, drumCenterY, drumOuterRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (activeDonFx) {
+      const donGlow = ctx.createRadialGradient(drumCenterX, drumCenterY, drumInnerRadius * 0.25, drumCenterX, drumCenterY, drumInnerRadius * 1.7);
+      donGlow.addColorStop(0, 'rgba(255, 72, 72, 0.94)');
+      donGlow.addColorStop(0.52, 'rgba(255, 72, 72, 0.5)');
+      donGlow.addColorStop(1, 'rgba(255, 98, 98, 0)');
+      ctx.fillStyle = donGlow;
+      ctx.beginPath();
+      ctx.arc(drumCenterX, drumCenterY, drumInnerRadius * 1.95, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = drumFaceColor;
+    ctx.beginPath();
+    ctx.arc(drumCenterX, drumCenterY, drumInnerRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Thin separator between rim and face.
+    ctx.strokeStyle = 'rgba(69, 76, 88, 0.85)';
+    ctx.lineWidth = Math.max(0.8, 1.5 * rowWidthScale);
+    ctx.beginPath();
+    ctx.arc(drumCenterX, drumCenterY, drumInnerRadius + 0.75, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (streakHits >= 10) {
+      const streakText = String(streakHits);
+      const streakFont = Math.max(20, Math.floor(drumInnerRadius * 0.92));
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 ${streakFont}px "Microsoft YaHei", "Noto Sans SC", sans-serif`;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#2a3342';
+      ctx.lineWidth = Math.max(3, Math.floor(streakFont * 0.16));
+      ctx.strokeText(streakText, drumCenterX, drumCenterY);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(streakText, drumCenterX, drumCenterY);
+    }
+
+    ctx.strokeStyle = '#1f2633';
+    ctx.lineWidth = Math.max(1, 4 * rowWidthScale);
+    ctx.beginPath();
+    ctx.arc(drumCenterX, drumCenterY, drumOuterRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (stackOrangeAboveLane) {
+      ctx.restore();
+    }
+
+    // Keep the lane and notes fully separated from the left drum panel.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(laneClipLeft, laneTop, Math.max(0, laneClipRight - laneClipLeft), laneBottom - laneTop);
+    ctx.clip();
+
+    for (const fx of hitFxRef.current) {
+      const elapsed = nowPerf - fx.time;
+      if (elapsed < 0 || elapsed > HIT_FLASH_MS) continue;
+      const progress = elapsed / HIT_FLASH_MS;
+      const alpha = Math.pow(1 - progress, 1.6) * (fx.type === 'don' ? 0.42 : 0.38);
+      const gradient = ctx.createLinearGradient(0, 0, width, 0);
+      if (fx.type === 'don') {
+        gradient.addColorStop(0, `rgba(255, 82, 82, ${alpha})`);
+        gradient.addColorStop(0.46, `rgba(255, 82, 82, ${alpha * 0.35})`);
+      } else {
+        gradient.addColorStop(0, `rgba(76, 164, 255, ${alpha})`);
+        gradient.addColorStop(0.46, `rgba(76, 164, 255, ${alpha * 0.35})`);
+      }
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, laneTop, width, laneBottom - laneTop);
+    }
+
+    for (const barLine of visibleBarLines) {
+      const x = Math.floor(barLine.x * rowWidthScale + laneShift) + 0.5;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.moveTo(x, laneTop);
+      ctx.lineTo(x, laneBottom);
+      ctx.stroke();
+    }
+
+    // Circular judgement frame: outer ring for big notes, inner ring for small notes.
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.58)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = noteJudgeOutlineWidth;
+    ctx.beginPath();
+    ctx.arc(judgeX, laneY, dynamicJudgeBigRadius - noteJudgeOutlineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = noteJudgeOutlineWidth;
+    ctx.beginPath();
+    ctx.arc(judgeX, laneY, dynamicJudgeSmallRadius - noteJudgeOutlineWidth / 2, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Innermost circle matches the small-note colored core circle size.
+    ctx.fillStyle = 'rgba(188, 198, 212, 0.58)';
+    ctx.beginPath();
+    ctx.arc(judgeX, laneY, smallNoteCoreRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (const note of visibleNotes) {
+      const x = note.x * rowWidthScale + laneShift;
+      const radius = note.isBig ? dynamicBigRadius : dynamicSmallRadius;
+      const blackBorderWidth = noteJudgeOutlineWidth;
+      const whiteRingWidth = noteJudgeOutlineWidth * 1.1;
+      const whiteRingRadius = radius - blackBorderWidth;
+      const coreRadius = (whiteRingRadius - whiteRingWidth) * noteCoreScale;
+
+      // Arcade-like layering: black rim -> white ring -> colored center.
+      ctx.fillStyle = '#0c0f14';
+      ctx.beginPath();
+      ctx.arc(x, laneY, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, laneY, whiteRingRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (note.type === 'don') {
+        ctx.fillStyle = '#e95a24';
+      } else {
+        ctx.fillStyle = '#3f8ff0';
+      }
+      ctx.beginPath();
+      ctx.arc(x, laneY, coreRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const roll of visibleRolls) {
+      const xStart = Math.max(-80, Math.min(width + 80, roll.xStart * rowWidthScale + laneShift));
+      const xEnd = Math.max(-80, Math.min(width + 80, roll.xEnd * rowWidthScale + laneShift));
+      const left = Math.min(xStart, xEnd);
+      const right = Math.max(xStart, xEnd);
+      const barHeight = roll.isBig
+        ? dynamicBigRadius * 2
+        : dynamicSmallRadius * 2;
+      const y = laneY - barHeight / 2;
+
+      ctx.fillStyle = '#f7c63a';
+      ctx.strokeStyle = '#c98812';
+      ctx.lineWidth = 3;
+
+      const widthPx = Math.max(10, right - left);
+      const radius = barHeight / 2;
+      const bodyWidth = Math.max(radius * 2, widthPx);
+
+      // Standard drumroll capsule: front semicircle + middle body + end semicircle.
+      ctx.beginPath();
+      ctx.moveTo(left + radius, y);
+      ctx.lineTo(left + bodyWidth - radius, y);
+      ctx.arc(left + bodyWidth - radius, y + radius, radius, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(left + radius, y + barHeight);
+      ctx.arc(left + radius, y + radius, radius, Math.PI / 2, -Math.PI / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    for (const balloon of visibleBalloons) {
+      const x = balloon.x * rowWidthScale + laneShift;
+      const baseRadius = balloon.isBig
+        ? dynamicBigRadius
+        : dynamicSmallRadius;
+      const holdRadius = balloon.isBig
+        ? dynamicJudgeBigRadius + 2
+        : dynamicJudgeBigRadius - 4;
+      const targetRadius = balloon.isHoldingAtJudge ? holdRadius : baseRadius;
+      const radius = targetRadius * (balloon.scale || 1);
+      const bodyGradient = ctx.createRadialGradient(x - 6, laneY - 8, 3, x, laneY, radius);
+      bodyGradient.addColorStop(0, '#ffd77a');
+      bodyGradient.addColorStop(0.58, '#ffad2e');
+      bodyGradient.addColorStop(1, '#e27f08');
+
+      ctx.fillStyle = bodyGradient;
+      ctx.strokeStyle = '#9a5f10';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, laneY, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      const countText = String(Math.max(0, balloon.remainingHits));
+      const fontSize = Math.max(18, Math.floor(radius * 0.74));
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 ${fontSize}px "Microsoft YaHei", "Noto Sans SC", sans-serif`;
+      ctx.lineWidth = Math.max(3, Math.floor(fontSize * 0.15));
+      ctx.strokeStyle = '#2a3342';
+      ctx.strokeText(countText, x, laneY);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(countText, x, laneY);
+    }
+
+    for (const popFx of balloonFxRef.current) {
+      const elapsed = nowPerf - popFx.time;
+      if (elapsed < 0 || elapsed > BALLOON_POP_FX_MS) continue;
+      const progress = elapsed / BALLOON_POP_FX_MS;
+      const alpha = Math.pow(1 - progress, 1.5);
+
+      const core = ctx.createRadialGradient(judgeX, laneY, 0, judgeX, laneY, dynamicBigRadius * (0.55 + progress * 0.9));
+      core.addColorStop(0, `rgba(255, 224, 132, ${(0.82 * alpha).toFixed(3)})`);
+      core.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(judgeX, laneY, dynamicBigRadius * (0.55 + progress * 0.9), 0, Math.PI * 2);
+      ctx.fill();
+
+      for (const particle of popFx.particles || []) {
+        const dist = dynamicJudgeBigRadius * 0.45 + particle.speed * (elapsed / 1000) * (1 - progress * 0.2);
+        const px = judgeX + Math.cos(particle.angle) * dist;
+        const py = laneY + Math.sin(particle.angle) * dist;
+        const pr = Math.max(0.8, particle.radius * (1 - progress * 0.45));
+        ctx.fillStyle = `rgba(255, 196, 78, ${(0.96 * alpha).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(px, py, pr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+
+    for (const judgeFx of judgeFxRef.current) {
+      const elapsed = nowPerf - judgeFx.time;
+      if (elapsed < 0 || elapsed > JUDGE_FEEDBACK_MS) continue;
+
+      if (judgeFx.isRollCombo) {
+        const p = Math.max(0, Math.min(1, elapsed / JUDGE_FEEDBACK_MS));
+        const alpha = Math.pow(1 - p, 0.92);
+        const comboX = judgeX;
+        const comboY = Math.floor(statusBarHeight * 0.5);
+        const baseFontSize = judgeFx.fontSize || 34;
+        const fontSize = Math.max(16, Math.round(baseFontSize * rowWidthScale));
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, width, statusBarHeight);
+        ctx.clip();
+        ctx.globalAlpha = alpha;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round';
+        ctx.font = `900 ${fontSize}px "Microsoft YaHei", "Noto Sans SC", sans-serif`;
+        ctx.lineWidth = Math.max(3, Math.floor(fontSize * 0.14));
+        ctx.strokeStyle = judgeFx.stroke;
+        ctx.strokeText(judgeFx.text, comboX, comboY);
+        ctx.fillStyle = judgeFx.fill;
+        ctx.fillText(judgeFx.text, comboX, comboY);
+        ctx.restore();
+        continue;
+      }
+
+      if (judgeFx.burstColor) {
+        const flashProgress = Math.max(0, Math.min(1, elapsed / JUDGE_FLASH_MS));
+        const burstAlpha = Math.pow(1 - flashProgress, 1.45);
+        const [r, g, b] = judgeFx.burstColor;
+
+        const coreRadius = dynamicJudgeSmallRadius * (0.7 + flashProgress * 0.35);
+        const core = ctx.createRadialGradient(judgeX, laneY, 0, judgeX, laneY, coreRadius);
+        core.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${(0.55 * burstAlpha).toFixed(3)})`);
+        core.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = core;
+        ctx.beginPath();
+        ctx.arc(judgeX, laneY, coreRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        for (const particle of judgeFx.particles || []) {
+          const dist = dynamicJudgeBigRadius * 0.72 + particle.speed * (elapsed / 1000) * (1 - flashProgress * 0.2);
+          const px = judgeX + Math.cos(particle.angle) * dist;
+          const py = laneY + Math.sin(particle.angle) * dist;
+          const pr = particle.radius * (1 - flashProgress * 0.32);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${(0.96 * burstAlpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(px, py, Math.max(0.7, pr), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      const textProgress = Math.max(0, Math.min(1, elapsed / JUDGE_FEEDBACK_MS));
+      const fastPhase = 0.42;
+      const holdPhase = 0.26;
+      const topEdgeY = Math.max(8, Math.round(18 * rowWidthScale));
+
+      let riseProgress;
+      if (textProgress <= fastPhase) {
+        const t = textProgress / fastPhase;
+        riseProgress = 1 - Math.pow(1 - t, 2.8);
+      } else if (textProgress <= fastPhase + holdPhase) {
+        riseProgress = 1;
+      } else {
+        const t = (textProgress - fastPhase - holdPhase) / (1 - fastPhase - holdPhase);
+        riseProgress = 1 + t * 0.06;
+      }
+
+      let textAlpha;
+      if (textProgress < 0.14) {
+        textAlpha = textProgress / 0.14;
+      } else if (textProgress < fastPhase + holdPhase) {
+        textAlpha = 1;
+      } else {
+        const t = (textProgress - fastPhase - holdPhase) / (1 - fastPhase - holdPhase);
+        textAlpha = Math.max(0, 1 - t);
+      }
+
+      const textScale = textProgress < 0.16 ? 0.8 + textProgress * 1.0 : 0.96;
+      const riseDistance = dynamicJudgeBigRadius * 1.56;
+      const textX = judgeX;
+      const baseFontSize = judgeFx.fontSize || (judgeFx.text === '不可' ? 40 : 42);
+      const fontSize = baseFontSize * rowWidthScale;
+      const topSafeY = Math.max(topEdgeY, fontSize * textScale * 0.62 + Math.round(8 * rowWidthScale));
+      const textY = Math.max(topSafeY, laneY - riseDistance * riseProgress);
+
+      ctx.save();
+      ctx.translate(textX, textY);
+      ctx.scale(textScale, textScale);
+      ctx.globalAlpha = textAlpha;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.font = `900 ${fontSize}px "Microsoft YaHei", "Noto Sans SC", sans-serif`;
+      ctx.lineWidth = 6 * rowWidthScale;
+      ctx.strokeStyle = judgeFx.stroke;
+      ctx.strokeText(judgeFx.text, 0, 0);
+      ctx.fillStyle = judgeFx.fill;
+      ctx.fillText(judgeFx.text, 0, 0);
+      ctx.restore();
+    }
+
+    for (const hitNoteFx of hitNoteFxRef.current) {
+      const elapsed = nowPerf - hitNoteFx.time;
+      if (elapsed < 0 || elapsed > HIT_NOTE_HOLD_MS + HIT_NOTE_FLY_MS) continue;
+
+      const radius = hitNoteFx.isBig ? dynamicBigRadius : dynamicSmallRadius;
+      const holdProgress = Math.min(1, elapsed / HIT_NOTE_HOLD_MS);
+      const flyProgress = Math.max(0, Math.min(1, (elapsed - HIT_NOTE_HOLD_MS) / HIT_NOTE_FLY_MS));
+      const travelX = laneDisplayWidth * 0.92;
+      const x = judgeX + hitNoteFx.sideJitter + flyProgress * travelX;
+      const tan45 = 1;
+      const baseLift = travelX * tan45;
+      const decelLift = baseLift * 0.42;
+      const yLift = baseLift * flyProgress - decelLift * flyProgress * flyProgress;
+      const y = laneY - yLift;
+      const alpha = flyProgress <= 0 ? 1 : Math.max(0, 1 - Math.pow(flyProgress, 1.15));
+      const scale = flyProgress <= 0
+        ? 1 + Math.sin(holdProgress * Math.PI) * 0.03
+        : Math.max(0.44, 1 - flyProgress * 0.56);
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+
+      const blackBorderWidth = noteJudgeOutlineWidth;
+      const whiteRingWidth = noteJudgeOutlineWidth * 1.1;
+      const whiteRingRadius = radius - blackBorderWidth;
+      const coreRadius = (whiteRingRadius - whiteRingWidth) * noteCoreScale;
+
+      ctx.fillStyle = '#0c0f14';
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, whiteRingRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = hitNoteFx.type === 'don' ? '#e95a24' : '#3f8ff0';
+      ctx.beginPath();
+      ctx.arc(0, 0, coreRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    const progressRegionTop = Math.max(0, Math.min(height, laneBottom));
+    const progressBandHeight = Math.max(0, Math.min(progressAreaHeight, height - progressRegionTop));
+    const remainderTop = progressRegionTop + progressBandHeight;
+    const remainderHeight = Math.max(0, height - remainderTop);
+
+    ctx.fillStyle = '#202836';
+    ctx.fillRect(0, progressRegionTop, width, progressBandHeight);
+    if (remainderHeight > 0) {
+      ctx.fillStyle = '#fff8ed';
+      ctx.fillRect(0, remainderTop, width, remainderHeight);
+    }
+    const progressBarMarginX = 14;
+    const progressBarHeight = 10;
+    const progressBarY = progressRegionTop + 4;
+    const progressBarX = progressBarMarginX;
+    const progressTrackWidth = Math.max(40, width - progressBarMarginX * 2);
+    const progressFillWidth = progressTrackWidth * progressRatio;
+
+    ctx.fillStyle = 'rgba(96, 112, 136, 0.34)';
+    ctx.beginPath();
+    ctx.roundRect(progressBarX, progressBarY, progressTrackWidth, progressBarHeight, 999);
+    ctx.fill();
+
+    if (progressFillWidth > 0) {
+      const progressGradient = ctx.createLinearGradient(progressBarX, 0, progressBarX + progressTrackWidth, 0);
+      progressGradient.addColorStop(0, '#ffb13f');
+      progressGradient.addColorStop(1, '#f16b2b');
+      ctx.fillStyle = progressGradient;
+      ctx.beginPath();
+      ctx.roundRect(progressBarX, progressBarY, progressFillWidth, progressBarHeight, 999);
+      ctx.fill();
+    }
+
+    const touchGuideCanvas = touchGuideCanvasRef.current;
+    if (touchGuideCanvas) {
+      const guideWidth = touchGuideCanvas.clientWidth || 1;
+      const guideHeight = touchGuideCanvas.clientHeight || 1;
+      const guideRenderWidth = Math.floor(guideWidth * dpr);
+      const guideRenderHeight = Math.floor(guideHeight * dpr);
+      if (touchGuideCanvas.width !== guideRenderWidth || touchGuideCanvas.height !== guideRenderHeight) {
+        touchGuideCanvas.width = guideRenderWidth;
+        touchGuideCanvas.height = guideRenderHeight;
+      }
+
+      const guideCtx = touchGuideCanvas.getContext('2d');
+      if (guideCtx) {
+        guideCtx.save();
+        guideCtx.scale(dpr, dpr);
+        guideCtx.clearRect(0, 0, guideWidth, guideHeight);
+
+        const arc = getTouchArcGeometry(guideWidth, guideHeight);
+        const nowPulse = performance.now();
+        const activePulses = touchGuidePulseRef.current.filter((pulse) => nowPulse - pulse.time <= TOUCH_GUIDE_VIBRATION_MS);
+        touchGuidePulseRef.current = activePulses;
+
+        let pulseScaleX = 1;
+        let pulseScaleY = 1;
+        let donPulseStrength = 0;
+        let kaPulseStrength = 0;
+        for (const pulse of activePulses) {
+          const t = Math.max(0, Math.min(1, (nowPulse - pulse.time) / TOUCH_GUIDE_VIBRATION_MS));
+          const wave = Math.sin(t * Math.PI * 4) * (1 - t);
+          const strength = 1 - t;
+          if (pulse.type === 'don') {
+            pulseScaleX += wave * 0.01;
+            pulseScaleY -= wave * 0.026;
+            donPulseStrength = Math.max(donPulseStrength, strength);
+          } else {
+            pulseScaleX -= wave * 0.022;
+            pulseScaleY += wave * 0.01;
+            kaPulseStrength = Math.max(kaPulseStrength, strength);
+          }
+        }
+
+        guideCtx.translate(arc.centerX, arc.centerY);
+        guideCtx.scale(pulseScaleX, pulseScaleY);
+        guideCtx.translate(-arc.centerX, -arc.centerY);
+
+        const leftX = 0;
+        const rightX = guideWidth;
+        const leftDx = leftX - arc.centerX;
+        const rightDx = rightX - arc.centerX;
+        const leftArcY = arc.centerY - Math.sqrt(Math.max(0, arc.radius * arc.radius - leftDx * leftDx));
+        const rightArcY = arc.centerY - Math.sqrt(Math.max(0, arc.radius * arc.radius - rightDx * rightDx));
+        const startAngle = Math.atan2(leftArcY - arc.centerY, leftX - arc.centerX);
+        const endAngle = Math.atan2(rightArcY - arc.centerY, rightX - arc.centerX);
+
+        const drumFacePath = new Path2D();
+        drumFacePath.moveTo(leftX, guideHeight);
+        drumFacePath.lineTo(leftX, leftArcY);
+        drumFacePath.arc(arc.centerX, arc.centerY, arc.radius, startAngle, endAngle, false);
+        drumFacePath.lineTo(rightX, guideHeight);
+        drumFacePath.closePath();
+
+        const fillGradient = guideCtx.createLinearGradient(0, leftArcY, 0, guideHeight);
+        fillGradient.addColorStop(0, 'rgba(255, 255, 255, 0.92)');
+        fillGradient.addColorStop(1, 'rgba(248, 248, 248, 0.96)');
+        guideCtx.fillStyle = fillGradient;
+        guideCtx.fill(drumFacePath);
+
+        if (donPulseStrength > 0.001) {
+          const donCenterY = leftArcY + (guideHeight - leftArcY) * 0.56;
+          const donOuterRadius = Math.max(guideWidth * 0.78, (guideHeight - leftArcY) * 1.2);
+          const donGradient = guideCtx.createRadialGradient(
+            arc.centerX,
+            donCenterY,
+            0,
+            arc.centerX,
+            donCenterY,
+            donOuterRadius
+          );
+          donGradient.addColorStop(0, `rgba(255, 124, 124, ${(0.52 * donPulseStrength).toFixed(3)})`);
+          donGradient.addColorStop(0.55, `rgba(255, 148, 148, ${(0.30 * donPulseStrength).toFixed(3)})`);
+          donGradient.addColorStop(1, 'rgba(255, 148, 148, 0)');
+          guideCtx.fillStyle = donGradient;
+          guideCtx.fill(drumFacePath);
+        }
+
+        // Drum-head hoop: outer shadow ring + thick black rim + inner highlight.
+        guideCtx.lineWidth = 3;
+        guideCtx.strokeStyle = 'rgba(0, 0, 0, 0.48)';
+        guideCtx.beginPath();
+        guideCtx.arc(arc.centerX, arc.centerY, arc.radius + 2.4, startAngle, endAngle, false);
+        guideCtx.stroke();
+
+        guideCtx.lineWidth = 9;
+        guideCtx.strokeStyle = 'rgba(8, 8, 8, 0.96)';
+        guideCtx.beginPath();
+        guideCtx.arc(arc.centerX, arc.centerY, arc.radius, startAngle, endAngle, false);
+        guideCtx.stroke();
+
+        guideCtx.lineWidth = 3;
+        guideCtx.strokeStyle = 'rgba(248, 248, 248, 0.86)';
+        guideCtx.beginPath();
+        guideCtx.arc(arc.centerX, arc.centerY, arc.radius - 2.0, startAngle, endAngle, false);
+        guideCtx.stroke();
+
+        if (kaPulseStrength > 0.001) {
+          const kaCenterY = leftArcY + (guideHeight - leftArcY) * 0.62;
+          const kaOverlayRadius = Math.max(guideWidth * 1.05, (guideHeight - leftArcY) * 1.6);
+          const kaOverlayGradient = guideCtx.createRadialGradient(
+            arc.centerX,
+            kaCenterY,
+            0,
+            arc.centerX,
+            kaCenterY,
+            kaOverlayRadius
+          );
+          kaOverlayGradient.addColorStop(0, `rgba(118, 196, 255, ${(0.24 * kaPulseStrength).toFixed(3)})`);
+          kaOverlayGradient.addColorStop(0.52, `rgba(138, 206, 255, ${(0.14 * kaPulseStrength).toFixed(3)})`);
+          kaOverlayGradient.addColorStop(1, 'rgba(138, 206, 255, 0)');
+          guideCtx.fillStyle = kaOverlayGradient;
+          guideCtx.fillRect(0, 0, guideWidth, guideHeight);
+
+          guideCtx.lineCap = 'round';
+          guideCtx.lineWidth = 12;
+          guideCtx.strokeStyle = `rgba(118, 196, 255, ${(0.62 * kaPulseStrength).toFixed(3)})`;
+          guideCtx.beginPath();
+          guideCtx.arc(arc.centerX, arc.centerY, arc.radius + 10, startAngle, endAngle, false);
+          guideCtx.stroke();
+
+          guideCtx.lineWidth = 6;
+          guideCtx.strokeStyle = `rgba(198, 232, 255, ${(0.72 * kaPulseStrength).toFixed(3)})`;
+          guideCtx.beginPath();
+          guideCtx.arc(arc.centerX, arc.centerY, arc.radius + 15, startAngle, endAngle, false);
+          guideCtx.stroke();
+        }
+
+        // Rivet-like hoop decorations spaced along the arc.
+        const rivetCount = 15;
+        for (let i = 1; i < rivetCount - 1; i += 1) {
+          const t = i / (rivetCount - 1);
+          const angle = startAngle + (endAngle - startAngle) * t;
+          const rx = arc.centerX + Math.cos(angle) * arc.radius;
+          const ry = arc.centerY + Math.sin(angle) * arc.radius;
+          const rivetRadius = 3.2;
+
+          guideCtx.fillStyle = 'rgba(12, 12, 12, 0.96)';
+          guideCtx.beginPath();
+          guideCtx.arc(rx, ry, rivetRadius, 0, Math.PI * 2);
+          guideCtx.fill();
+
+          guideCtx.lineWidth = 1;
+          guideCtx.strokeStyle = 'rgba(255, 255, 255, 0.32)';
+          guideCtx.stroke();
+
+          guideCtx.fillStyle = 'rgba(255, 255, 255, 0.62)';
+          guideCtx.beginPath();
+          guideCtx.arc(rx - 0.8, ry - 0.8, 1.1, 0, Math.PI * 2);
+          guideCtx.fill();
+        }
+
+        guideCtx.restore();
+      }
+    }
+
+    ctx.restore();
+  }, [visibleNotes, visibleBarLines, visibleRolls, visibleBalloons, scrollTheme, hitFxTick, activeRollForDisplay, rollHitCounts, rollBalloonHits, streakHits, summary, ngCount, nowMs, durationMs, barLines, notes.length, getTouchArcGeometry]);
+
+  useEffect(() => {
+    drawLaneCanvas();
+  }, [drawLaneCanvas]);
+
+  useEffect(() => {
+    const onResize = () => {
+      drawLaneCanvas();
+      setIsMobileToolbar(window.innerWidth <= MOBILE_TOOLBAR_BREAKPOINT);
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }, [drawLaneCanvas]);
+
+  const mainPlaybackLabel = isPlaying ? '暂停' : (isPaused ? '继续' : '开始');
+  const mainPlaybackIcon = isPlaying ? '⏸' : '▶';
+  const mainPlaybackAction = isPlaying ? pausePlayback : (isPaused ? resumePlayback : startPlayback);
+  const mainPlaybackDisabled = !notes.length && !isPlaying;
+
+  return (
+    <div className="results-panel practice-panel">
+      <PracticeBreadcrumb />
+
+      <div className="table-wrapper practice-wrapper">
+        <PracticeToolbar
+          isMobileToolbar={isMobileToolbar}
+          onImportClick={() => fileInputRef.current?.click()}
+          mainPlaybackAction={mainPlaybackAction}
+          mainPlaybackDisabled={mainPlaybackDisabled}
+          mainPlaybackLabel={mainPlaybackLabel}
+          mainPlaybackIcon={mainPlaybackIcon}
+          onSeekPrevBar={() => seekByBarLine(-1)}
+          onSeekNextBar={() => seekByBarLine(1)}
+          onReset={resetPlayback}
+          notesLength={notes.length}
+          isPaused={isPaused}
+          availableBranches={availableBranches}
+          branchSelection={branchSelection}
+          isPlaying={isPlaying}
+          onBranchSelectionChange={setBranchSelection}
+        />
+
+        <PracticeStage
+          onPointerDown={handlePracticePointerDown}
+          canvasRef={canvasRef}
+          touchGuideCanvasRef={touchGuideCanvasRef}
+          fileInputRef={fileInputRef}
+          onImportLocalCharts={importLocalCharts}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default PracticeModePage;
