@@ -310,17 +310,17 @@ body {
 }
 
 .app-nav-drawer .fui-NavItem__icon {
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .app-nav-drawer .fui-NavItem__icon :where(svg) {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
 .nav-tools-divider {

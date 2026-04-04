@@ -36,10 +36,15 @@ import { VirtualizerScrollView } from '@fluentui/react-virtualizer';
 import {
   ArrowDownloadRegular,
   ArrowUploadRegular,
+  Calculator20Regular,
   CalculatorRegular,
+  DataLine20Regular,
+  DataHistogram20Regular,
   DataHistogramRegular,
   FilterRegular,
+  Info20Regular,
   InfoRegular,
+  MoneyCalculator20Regular,
   MoneyCalculatorRegular,
   SearchRegular,
   StarFilled,
@@ -1710,16 +1715,16 @@ function App() {
               selectedValue={selectedNavValue}
             >
               <NavSectionHeader>数据分析</NavSectionHeader>
-              <NavItem value="constants" icon={<DataHistogramRegular />}>定数表</NavItem>
-              <NavItem value="analysis" icon={<DataHistogramRegular />}>谱面分析</NavItem>
+              <NavItem value="constants" icon={<DataHistogram20Regular />}>定数表</NavItem>
+              <NavItem value="analysis" icon={<DataLine20Regular />}>谱面分析</NavItem>
 
               <NavDivider />
               <NavSectionHeader>出勤工具</NavSectionHeader>
-              <NavItem value="singlePrice" icon={<MoneyCalculatorRegular />}>单曲价格速算</NavItem>
-              <NavItem value="targetScore" icon={<CalculatorRegular />}>目标成绩速算</NavItem>
+              <NavItem value="singlePrice" icon={<MoneyCalculator20Regular />}>单曲价格速算</NavItem>
+              <NavItem value="targetScore" icon={<Calculator20Regular />}>目标成绩速算</NavItem>
 
               <NavDivider />
-              <NavItem value="about" icon={<InfoRegular />}>关于</NavItem>
+              <NavItem value="about" icon={<Info20Regular />}>关于</NavItem>
             </Nav>
           </NavDrawerBody>
         </NavDrawer>
@@ -1769,7 +1774,7 @@ function App() {
                   上传谱面
                 </ToolbarButton>
                 <ToolbarButton className="list-toolbar-button" appearance="subtle" size="small" disabled={!allResults.length} icon={<ArrowDownloadRegular />} onClick={exportResults}>
-                  导出定数
+                  导出结果
                 </ToolbarButton>
               </Toolbar>
             </header>
