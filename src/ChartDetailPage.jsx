@@ -858,7 +858,7 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
               </section>
 
               <section className="chart-detail-card chart-detail-ratings-card" aria-label="定数">
-                <h3 className="chart-detail-card-title">定数</h3>
+                <h3 className="chart-detail-card-title">难易度量化评估</h3>
                 {ratingItems.length ? (
                   <div className="chart-detail-ratings-grid">
                     {ratingItems.map((item) => (
