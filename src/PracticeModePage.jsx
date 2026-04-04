@@ -1002,7 +1002,12 @@ function PracticeModePage() {
     const width = Math.max(1, zoneWidth);
     const height = Math.max(1, zoneHeight);
     // Keep the drum centered in the lower touch zone and leave clear whitespace around it.
-    const arcRadius = Math.max(24, Math.min(width * 0.32, height * 0.52));
+    const visualPadding = 18;
+    const pulseScaleSafety = 1.05;
+    const outerEffectSafety = 18;
+    const safeRadiusByWidth = (width / 2 - visualPadding - outerEffectSafety) / pulseScaleSafety;
+    const safeRadiusByHeight = (height / 2 - visualPadding - outerEffectSafety) / pulseScaleSafety;
+    const arcRadius = Math.max(24, Math.min(width * 0.32, height * 0.42, safeRadiusByWidth, safeRadiusByHeight));
     return {
       centerX: width / 2,
       centerY: height / 2,
@@ -1650,7 +1655,8 @@ function PracticeModePage() {
     ctx.arc(judgeX, laneY, smallNoteCoreRadius, 0, Math.PI * 2);
     ctx.fill();
 
-    for (const note of visibleNotes) {
+    const layeredVisibleNotes = [...visibleNotes].sort((a, b) => b.x - a.x);
+    for (const note of layeredVisibleNotes) {
       const x = note.x * rowWidthScale + laneShift;
       const radius = note.isBig ? dynamicBigRadius : dynamicSmallRadius;
       const blackBorderWidth = noteJudgeOutlineWidth;
@@ -2018,7 +2024,7 @@ function PracticeModePage() {
 
         if (donPulseStrength > 0.001) {
           const donCenterY = arc.centerY + drumRadius * 0.2;
-          const donOuterRadius = drumRadius * 1.12;
+          const donOuterRadius = drumRadius * 1.22;
           const donGradient = guideCtx.createRadialGradient(
             arc.centerX,
             donCenterY,
@@ -2027,8 +2033,9 @@ function PracticeModePage() {
             donCenterY,
             donOuterRadius
           );
-          donGradient.addColorStop(0, `rgba(255, 124, 124, ${(0.52 * donPulseStrength).toFixed(3)})`);
-          donGradient.addColorStop(0.55, `rgba(255, 148, 148, ${(0.30 * donPulseStrength).toFixed(3)})`);
+          donGradient.addColorStop(0, `rgba(255, 124, 124, ${(0.15 * donPulseStrength).toFixed(3)})`);
+          donGradient.addColorStop(0.55, `rgba(255, 148, 148, ${(0.24 * donPulseStrength).toFixed(3)})`);
+          donGradient.addColorStop(0.84, `rgba(255, 148, 148, ${(0.38 * donPulseStrength).toFixed(3)})`);
           donGradient.addColorStop(1, 'rgba(255, 148, 148, 0)');
           guideCtx.save();
           guideCtx.clip(drumFacePath);
@@ -2067,8 +2074,9 @@ function PracticeModePage() {
             kaCenterY,
             kaOverlayRadius
           );
-          kaOverlayGradient.addColorStop(0, `rgba(118, 196, 255, ${(0.24 * kaPulseStrength).toFixed(3)})`);
-          kaOverlayGradient.addColorStop(0.52, `rgba(138, 206, 255, ${(0.14 * kaPulseStrength).toFixed(3)})`);
+          kaOverlayGradient.addColorStop(0, `rgba(118, 196, 255, ${(0.06 * kaPulseStrength).toFixed(3)})`);
+          kaOverlayGradient.addColorStop(0.60, `rgba(138, 206, 255, ${(0.10 * kaPulseStrength).toFixed(3)})`);
+          kaOverlayGradient.addColorStop(0.84, `rgba(138, 206, 255, ${(0.18 * kaPulseStrength).toFixed(3)})`);
           kaOverlayGradient.addColorStop(1, 'rgba(138, 206, 255, 0)');
           guideCtx.save();
           guideCtx.clip(drumFacePath);
