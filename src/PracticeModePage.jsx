@@ -1169,12 +1169,29 @@ function PracticeModePage() {
   const handlePracticePointerDown = useCallback((event) => {
     const frame = event.currentTarget;
     if (!frame) return;
+    const touchCanvasRect = touchGuideCanvasRef.current?.getBoundingClientRect?.();
+    if (!touchCanvasRect) return;
+
+    // Only touch interactions inside the touch-guide canvas should trigger drum feedback.
+    const isInsideTouchZone = (
+      event.clientX >= touchCanvasRect.left &&
+      event.clientX <= touchCanvasRect.right &&
+      event.clientY >= touchCanvasRect.top &&
+      event.clientY <= touchCanvasRect.bottom
+    );
+    if (!isInsideTouchZone) {
+      return;
+    }
+
+    const deadzoneTopClientY = touchCanvasRect.bottom - touchBottomDeadzonePx;
+    if (event.clientY >= deadzoneTopClientY) {
+      event.preventDefault();
+      return;
+    }
+
     const frameRect = frame.getBoundingClientRect();
     const localX = event.clientX - frameRect.left;
     const localY = event.clientY - frameRect.top;
-
-    const touchCanvasRect = touchGuideCanvasRef.current?.getBoundingClientRect?.();
-    if (!touchCanvasRect) return;
 
     const zoneOffsetX = touchCanvasRect.left - frameRect.left;
     const zoneOffsetY = touchCanvasRect.top - frameRect.top;
@@ -1475,7 +1492,7 @@ function PracticeModePage() {
     ctx.scale(dpr, dpr);
 
     const statusBarHeight = 66;
-    const progressAreaHeight = 24;
+    const progressAreaHeight = 22;
     const baseLaneTop = statusBarHeight;
     const baseLaneBottom = Math.max(baseLaneTop + 120, height - progressAreaHeight);
     const baseLaneHeight = Math.max(120, baseLaneBottom - baseLaneTop);
@@ -2058,9 +2075,10 @@ function PracticeModePage() {
       ctx.fillStyle = '#fff8ed';
       ctx.fillRect(0, remainderTop, width, remainderHeight);
     }
-    const progressBarMarginX = 14;
-    const progressBarHeight = 10;
-    const progressBarY = progressRegionTop + 4;
+    const progressBarHeight = 8;
+    const progressBarInset = Math.max(0, (progressBandHeight - progressBarHeight) / 2);
+    const progressBarMarginX = progressBarInset;
+    const progressBarY = progressRegionTop + progressBarInset;
     const progressBarX = progressBarMarginX;
     const progressTrackWidth = Math.max(40, width - progressBarMarginX * 2);
     const progressFillWidth = progressTrackWidth * progressRatio;
@@ -2121,6 +2139,8 @@ function PracticeModePage() {
           }
         }
 
+        // Keep pulse transform scoped to the drum only.
+        guideCtx.save();
         guideCtx.translate(arc.centerX, arc.centerY);
         guideCtx.scale(pulseScaleX, pulseScaleY);
         guideCtx.translate(-arc.centerX, -arc.centerY);
@@ -2235,6 +2255,8 @@ function PracticeModePage() {
           guideCtx.arc(rx - 0.8, ry - 0.8, 1.1, 0, Math.PI * 2);
           guideCtx.fill();
         }
+
+        guideCtx.restore();
 
         if (!isTouchBottomDeadzoneMaskHidden && touchBottomDeadzonePx > 0) {
           const deadzoneTop = Math.max(0, guideHeight - touchBottomDeadzonePx);
