@@ -2070,6 +2070,20 @@ function PracticeModePage() {
     const drumRimThickness = Math.max(minRimThickness, Math.floor(drumOuterRadius * 0.16));
     const minInnerRadius = Math.max(8, Math.round(22 * rowWidthScale));
     const drumInnerRadius = Math.max(minInnerRadius, drumOuterRadius - drumRimThickness);
+    const drawStreakOnDrum = () => {
+      if (streakHits < 10) return;
+      const streakText = String(streakHits);
+      const streakFont = Math.max(20, Math.floor(drumInnerRadius * 0.92));
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 ${streakFont}px "Microsoft YaHei", "Noto Sans SC", sans-serif`;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#2a3342';
+      ctx.lineWidth = Math.max(3, Math.floor(streakFont * 0.16));
+      ctx.strokeText(streakText, drumCenterX, drumCenterY);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(streakText, drumCenterX, drumCenterY);
+    };
 
     const nowPerf = performance.now();
     const activeDonFx = hitFxRef.current.some((fx) => fx.type === 'don' && nowPerf - fx.time >= 0 && nowPerf - fx.time <= HIT_FLASH_MS);
@@ -2220,18 +2234,8 @@ function PracticeModePage() {
     ctx.arc(drumCenterX, drumCenterY, drumInnerRadius + 0.75, 0, Math.PI * 2);
     ctx.stroke();
 
-    if (streakHits >= 10) {
-      const streakText = String(streakHits);
-      const streakFont = Math.max(20, Math.floor(drumInnerRadius * 0.92));
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = `900 ${streakFont}px "Microsoft YaHei", "Noto Sans SC", sans-serif`;
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#2a3342';
-      ctx.lineWidth = Math.max(3, Math.floor(streakFont * 0.16));
-      ctx.strokeText(streakText, drumCenterX, drumCenterY);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(streakText, drumCenterX, drumCenterY);
+    if (!stackOrangeAboveLane) {
+      drawStreakOnDrum();
     }
 
     ctx.strokeStyle = '#1f2633';
@@ -2242,6 +2246,7 @@ function PracticeModePage() {
 
     if (stackOrangeAboveLane) {
       ctx.restore();
+      drawStreakOnDrum();
     }
 
     // Keep the lane and notes fully separated from the left drum panel.
