@@ -833,15 +833,17 @@ function PracticeModePage() {
 
         const residualDrift = smoothedDrift - driftBaselineAppliedMsRef.current;
 
-        const correctionMs = Math.max(
+        const residualCorrectionMs = Math.max(
           -MAX_DRIFT_CORRECTION_MS,
           Math.min(MAX_DRIFT_CORRECTION_MS, residualDrift * DRIFT_CORRECTION_RATIO)
         );
-        current = perfClockMs + correctionMs;
+        // Apply learned baseline directly so fixed device offset truly affects chart clock,
+        // then use capped residual correction for small runtime drift.
+        current = perfClockMs + driftBaselineAppliedMsRef.current + residualCorrectionMs;
 
         if (nowPerf - driftDisplayUpdateAtRef.current >= DRIFT_MONITOR_UPDATE_MS) {
           driftDisplayUpdateAtRef.current = nowPerf;
-          setClockDriftMs(Math.round(residualDrift));
+          setClockDriftMs(Math.round(audioClockMs - current));
         }
       }
     }
