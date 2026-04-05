@@ -69,7 +69,9 @@ const PRACTICE_TOUCH_BOTTOM_DEADZONE_MASK_HIDDEN_STORAGE_KEY = 'taiko-rating.pra
 const PRACTICE_DRIFT_MONITOR_VISIBLE_STORAGE_KEY = 'taiko-rating.practice.drift-monitor-visible.v1';
 const DRIFT_MONITOR_UPDATE_MS = 180;
 const DRIFT_SMOOTH_FACTOR = 0.12;
-const DRIFT_CORRECTION_RATIO = 0.55;
+const DRIFT_CORRECTION_MIN_RATIO = 0.55;
+const DRIFT_CORRECTION_MAX_RATIO = 0.96;
+const DRIFT_CORRECTION_RAMP_MS = 3500;
 const MAX_DRIFT_SAMPLE_MS = 220;
 const MAX_DRIFT_CORRECTION_MS = 110;
 const DRIFT_BASELINE_WARMUP_MS = 160;
@@ -109,6 +111,7 @@ function PracticeModePage() {
   const driftBaselineAccumMsRef = useRef(0);
   const driftBaselineSampleCountRef = useRef(0);
   const driftBaselineLockedRef = useRef(false);
+  const driftBaselineForcedAtBarStartRef = useRef(false);
 
   const [, setStatusText] = useState('准备就绪：导入本地 TJA 后点击开始。按键：F/J=咚，D/K=咔。');
   const [songTitle, setSongTitle] = useState('');
@@ -748,6 +751,7 @@ function PracticeModePage() {
     driftBaselineAccumMsRef.current = 0;
     driftBaselineSampleCountRef.current = 0;
     driftBaselineLockedRef.current = false;
+    driftBaselineForcedAtBarStartRef.current = false;
     setClockDriftMs(0);
     setHitFxTick((prev) => prev + 1);
     setStatusText('已重置，点击开始进行练习。');
@@ -771,6 +775,7 @@ function PracticeModePage() {
       missIgnoreBeforeMsRef.current = -Infinity;
       suppressNotesBeforeMsRef.current = -Infinity;
       hasUsedBarSeekRef.current = false;
+      driftBaselineForcedAtBarStartRef.current = false;
       return;
     }
 
@@ -792,6 +797,7 @@ function PracticeModePage() {
     missIgnoreBeforeMsRef.current = -Infinity;
     suppressNotesBeforeMsRef.current = -Infinity;
     hasUsedBarSeekRef.current = false;
+    driftBaselineForcedAtBarStartRef.current = false;
   }, [chartStartOffsetMs]);
 
   const getCurrentChartTimeMs = useCallback(() => {
@@ -809,6 +815,15 @@ function PracticeModePage() {
         const rawDrift = Math.max(-MAX_DRIFT_SAMPLE_MS, Math.min(MAX_DRIFT_SAMPLE_MS, audioClockMs - perfClockMs));
         const smoothedDrift = driftEstimateMsRef.current + (rawDrift - driftEstimateMsRef.current) * DRIFT_SMOOTH_FACTOR;
         driftEstimateMsRef.current = smoothedDrift;
+
+        if (!driftBaselineForcedAtBarStartRef.current && current >= chartStartOffsetMs) {
+          driftBaselineMsRef.current = smoothedDrift;
+          driftBaselineAppliedMsRef.current = smoothedDrift;
+          driftBaselineAccumMsRef.current = smoothedDrift;
+          driftBaselineSampleCountRef.current = 1;
+          driftBaselineLockedRef.current = true;
+          driftBaselineForcedAtBarStartRef.current = true;
+        }
 
         if (audioElapsedMs >= DRIFT_BASELINE_WARMUP_MS && audioElapsedMs <= DRIFT_BASELINE_WINDOW_MS) {
           driftBaselineAccumMsRef.current += smoothedDrift;
@@ -833,9 +848,15 @@ function PracticeModePage() {
 
         const residualDrift = smoothedDrift - driftBaselineAppliedMsRef.current;
 
+        // Ramp correction strength during early playback so startup jitter is filtered,
+        // then converge toward near-zero felt sync delta after lane starts rolling.
+        const correctionRamp = Math.max(0, Math.min(1, audioElapsedMs / DRIFT_CORRECTION_RAMP_MS));
+        const correctionRatio =
+          DRIFT_CORRECTION_MIN_RATIO + (DRIFT_CORRECTION_MAX_RATIO - DRIFT_CORRECTION_MIN_RATIO) * correctionRamp;
+
         const residualCorrectionMs = Math.max(
           -MAX_DRIFT_CORRECTION_MS,
-          Math.min(MAX_DRIFT_CORRECTION_MS, residualDrift * DRIFT_CORRECTION_RATIO)
+          Math.min(MAX_DRIFT_CORRECTION_MS, residualDrift * correctionRatio)
         );
         // Apply learned baseline directly so fixed device offset truly affects chart clock,
         // then use capped residual correction for small runtime drift.
@@ -850,7 +871,7 @@ function PracticeModePage() {
     }
 
     return current;
-  }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs]);
+  }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs, chartStartOffsetMs]);
 
   const runFrame = useCallback(() => {
     const current = getCurrentChartTimeMs();
@@ -902,6 +923,7 @@ function PracticeModePage() {
     driftBaselineAccumMsRef.current = 0;
     driftBaselineSampleCountRef.current = 0;
     driftBaselineLockedRef.current = false;
+    driftBaselineForcedAtBarStartRef.current = false;
     setClockDriftMs(0);
     setRollBalloonHits(0);
     setStreakHits(0);
