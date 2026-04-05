@@ -7,7 +7,8 @@ import {
   DialogContent,
   DialogSurface,
   DialogTitle,
-  Input
+  Input,
+  Switch
 } from '@fluentui/react-components';
 import { DismissRegular } from '@fluentui/react-icons';
 import JSZip from 'jszip';
@@ -63,6 +64,8 @@ const PRACTICE_AUDIO_COMPENSATION_STORAGE_KEY = 'taiko-rating.practice.audio-com
 const PRACTICE_TOUCH_DRUM_OFFSET_X_STORAGE_KEY = 'taiko-rating.practice.touch-drum-offset-x.v1';
 const PRACTICE_TOUCH_DRUM_OFFSET_Y_STORAGE_KEY = 'taiko-rating.practice.touch-drum-offset-y.v1';
 const PRACTICE_TOUCH_DRUM_SCALE_STORAGE_KEY = 'taiko-rating.practice.touch-drum-scale-percent.v1';
+const PRACTICE_TOUCH_BOTTOM_DEADZONE_STORAGE_KEY = 'taiko-rating.practice.touch-bottom-deadzone-px.v1';
+const PRACTICE_TOUCH_BOTTOM_DEADZONE_MASK_HIDDEN_STORAGE_KEY = 'taiko-rating.practice.touch-bottom-deadzone-mask-hidden.v1';
 
 function PracticeModePage() {
   const fileInputRef = useRef(null);
@@ -140,19 +143,41 @@ function PracticeModePage() {
     const parsed = Number.parseFloat(String(raw ?? '100'));
     return Number.isFinite(parsed) ? parsed : 100;
   });
+  const [touchBottomDeadzonePx, setTouchBottomDeadzonePx] = useState(() => {
+    if (typeof window === 'undefined') return 100;
+    const raw = window.localStorage.getItem(PRACTICE_TOUCH_BOTTOM_DEADZONE_STORAGE_KEY);
+    const parsed = Number.parseFloat(String(raw ?? '100'));
+    return Number.isFinite(parsed) ? parsed : 100;
+  });
+  const [isTouchBottomDeadzoneMaskHidden, setIsTouchBottomDeadzoneMaskHidden] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const raw = window.localStorage.getItem(PRACTICE_TOUCH_BOTTOM_DEADZONE_MASK_HIDDEN_STORAGE_KEY);
+    return raw === '1';
+  });
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
   const [compensationInputValue, setCompensationInputValue] = useState('0');
   const [touchDrumOffsetXInputValue, setTouchDrumOffsetXInputValue] = useState('0');
   const [touchDrumOffsetYInputValue, setTouchDrumOffsetYInputValue] = useState('0');
   const [touchDrumScaleInputValue, setTouchDrumScaleInputValue] = useState('100');
+  const [touchBottomDeadzoneInputValue, setTouchBottomDeadzoneInputValue] = useState('100');
+  const [hideTouchBottomDeadzoneMaskInputValue, setHideTouchBottomDeadzoneMaskInputValue] = useState(false);
 
   const openSettingsDialog = useCallback(() => {
     setCompensationInputValue(String(touchAudioLatencyCompensationMs));
     setTouchDrumOffsetXInputValue(String(touchDrumOffsetX));
     setTouchDrumOffsetYInputValue(String(touchDrumOffsetY));
     setTouchDrumScaleInputValue(String(touchDrumScalePercent));
+    setTouchBottomDeadzoneInputValue(String(touchBottomDeadzonePx));
+    setHideTouchBottomDeadzoneMaskInputValue(isTouchBottomDeadzoneMaskHidden);
     setIsSettingsDialogOpen(true);
-  }, [touchAudioLatencyCompensationMs, touchDrumOffsetX, touchDrumOffsetY, touchDrumScalePercent]);
+  }, [
+    touchAudioLatencyCompensationMs,
+    touchDrumOffsetX,
+    touchDrumOffsetY,
+    touchDrumScalePercent,
+    touchBottomDeadzonePx,
+    isTouchBottomDeadzoneMaskHidden
+  ]);
 
   const closeSettingsDialog = useCallback(() => {
     setIsSettingsDialogOpen(false);
@@ -164,21 +189,37 @@ function PracticeModePage() {
     const parsedOffsetX = Number.parseFloat(String(touchDrumOffsetXInputValue || '0'));
     const parsedOffsetY = Number.parseFloat(String(touchDrumOffsetYInputValue || '0'));
     const parsedScale = Number.parseFloat(String(touchDrumScaleInputValue || '100'));
+    const parsedDeadzone = Number.parseFloat(String(touchBottomDeadzoneInputValue || '100'));
     const safeOffsetX = Number.isFinite(parsedOffsetX) ? Math.max(-300, Math.min(300, parsedOffsetX)) : 0;
     const safeOffsetY = Number.isFinite(parsedOffsetY) ? Math.max(-300, Math.min(300, parsedOffsetY)) : 0;
     const safeScale = Number.isFinite(parsedScale) ? Math.max(10, Math.min(500, parsedScale)) : 100;
+    const safeBottomDeadzone = Number.isFinite(parsedDeadzone) ? Math.max(0, Math.min(400, parsedDeadzone)) : 100;
     setTouchAudioLatencyCompensationMs(safeValue);
     setTouchDrumOffsetX(safeOffsetX);
     setTouchDrumOffsetY(safeOffsetY);
     setTouchDrumScalePercent(safeScale);
+    setTouchBottomDeadzonePx(safeBottomDeadzone);
+    setIsTouchBottomDeadzoneMaskHidden(hideTouchBottomDeadzoneMaskInputValue);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(PRACTICE_AUDIO_COMPENSATION_STORAGE_KEY, String(safeValue));
       window.localStorage.setItem(PRACTICE_TOUCH_DRUM_OFFSET_X_STORAGE_KEY, String(safeOffsetX));
       window.localStorage.setItem(PRACTICE_TOUCH_DRUM_OFFSET_Y_STORAGE_KEY, String(safeOffsetY));
       window.localStorage.setItem(PRACTICE_TOUCH_DRUM_SCALE_STORAGE_KEY, String(safeScale));
+      window.localStorage.setItem(PRACTICE_TOUCH_BOTTOM_DEADZONE_STORAGE_KEY, String(safeBottomDeadzone));
+      window.localStorage.setItem(
+        PRACTICE_TOUCH_BOTTOM_DEADZONE_MASK_HIDDEN_STORAGE_KEY,
+        hideTouchBottomDeadzoneMaskInputValue ? '1' : '0'
+      );
     }
     setIsSettingsDialogOpen(false);
-  }, [compensationInputValue, touchDrumOffsetXInputValue, touchDrumOffsetYInputValue, touchDrumScaleInputValue]);
+  }, [
+    compensationInputValue,
+    touchDrumOffsetXInputValue,
+    touchDrumOffsetYInputValue,
+    touchDrumScaleInputValue,
+    touchBottomDeadzoneInputValue,
+    hideTouchBottomDeadzoneMaskInputValue
+  ]);
 
   const summary = useMemo(() => summarizeResults(notes), [notes]);
   const ngCount = useMemo(() => summary.bad + summary.miss, [summary.bad, summary.miss]);
@@ -1126,13 +1167,18 @@ function PracticeModePage() {
     const zoneY = localY - zoneOffsetY;
 
     const arc = getTouchArcGeometry(touchCanvasRect.width, touchCanvasRect.height);
+    const deadzoneTop = Math.max(0, touchCanvasRect.height - touchBottomDeadzonePx);
+    if (zoneY >= deadzoneTop) {
+      event.preventDefault();
+      return;
+    }
     const dx = zoneX - arc.centerX;
     const dy = zoneY - arc.centerY;
     const isDon = dx * dx + dy * dy <= arc.radius * arc.radius;
 
     event.preventDefault();
     triggerInputFeedback(isDon ? 'don' : 'ka');
-  }, [getTouchArcGeometry, triggerInputFeedback]);
+  }, [getTouchArcGeometry, touchBottomDeadzonePx, triggerInputFeedback]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -2201,12 +2247,68 @@ function PracticeModePage() {
           guideCtx.fill();
         }
 
+        if (!isTouchBottomDeadzoneMaskHidden && touchBottomDeadzonePx > 0) {
+          const deadzoneTop = Math.max(0, guideHeight - touchBottomDeadzonePx);
+          const deadzoneHeight = Math.max(0, guideHeight - deadzoneTop);
+          if (deadzoneHeight > 0.5) {
+            guideCtx.fillStyle = 'rgba(26, 34, 48, 0.34)';
+            guideCtx.fillRect(0, deadzoneTop, guideWidth, deadzoneHeight);
+
+            guideCtx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+            guideCtx.lineWidth = 1.5;
+            guideCtx.setLineDash([8, 6]);
+            guideCtx.beginPath();
+            guideCtx.moveTo(0, deadzoneTop + 0.5);
+            guideCtx.lineTo(guideWidth, deadzoneTop + 0.5);
+            guideCtx.stroke();
+            guideCtx.setLineDash([]);
+
+            guideCtx.save();
+            guideCtx.beginPath();
+            guideCtx.rect(0, deadzoneTop, guideWidth, deadzoneHeight);
+            guideCtx.clip();
+            guideCtx.strokeStyle = 'rgba(255, 255, 255, 0.34)';
+            const hatchStrokeWidth = 6;
+            const hatchGapWidth = 10;
+            guideCtx.lineWidth = hatchStrokeWidth;
+            const hatchSpacing = hatchStrokeWidth + hatchGapWidth;
+            const hatchSpan = guideHeight + guideWidth;
+            for (let x = -hatchSpan; x <= guideWidth + hatchSpan; x += hatchSpacing) {
+              guideCtx.beginPath();
+              guideCtx.moveTo(x, deadzoneTop + deadzoneHeight);
+              guideCtx.lineTo(x + deadzoneHeight, deadzoneTop);
+              guideCtx.stroke();
+            }
+            guideCtx.restore();
+          }
+        }
+
         guideCtx.restore();
       }
     }
 
     ctx.restore();
-  }, [visibleNotes, visibleBarLines, visibleRolls, visibleBalloons, scrollTheme, hitFxTick, activeRollForDisplay, rollHitCounts, rollBalloonHits, streakHits, summary, ngCount, nowMs, durationMs, barLines, notes.length, getTouchArcGeometry]);
+  }, [
+    visibleNotes,
+    visibleBarLines,
+    visibleRolls,
+    visibleBalloons,
+    scrollTheme,
+    hitFxTick,
+    activeRollForDisplay,
+    rollHitCounts,
+    rollBalloonHits,
+    streakHits,
+    summary,
+    ngCount,
+    nowMs,
+    durationMs,
+    barLines,
+    notes.length,
+    getTouchArcGeometry,
+    touchBottomDeadzonePx,
+    isTouchBottomDeadzoneMaskHidden
+  ]);
 
   useEffect(() => {
     drawLaneCanvas();
@@ -2314,6 +2416,29 @@ function PracticeModePage() {
                       contentAfter="%"
                     />
                     <p className="practice-setting-help">仅控制大小。默认 100%，范围 10% 到 500%。当前：{touchDrumScalePercent}%</p>
+                  </div>
+
+                  <div className="practice-setting-item">
+                    <label className="practice-setting-label" htmlFor="practice-touch-bottom-deadzone-input">底边防误触高度</label>
+                    <Input
+                      id="practice-touch-bottom-deadzone-input"
+                      type="number"
+                      value={touchBottomDeadzoneInputValue}
+                      onChange={(_, data) => setTouchBottomDeadzoneInputValue(String(data?.value ?? ''))}
+                      contentAfter="px"
+                    />
+                    <p className="practice-setting-help">该高度以下不会触发触摸判定。默认 100，范围 0 到 400。当前：{touchBottomDeadzonePx}px</p>
+                  </div>
+
+                  <div className="practice-setting-item">
+                    <label className="practice-setting-label" htmlFor="practice-touch-bottom-deadzone-mask-hidden-switch">禁区遮罩显示</label>
+                    <Switch
+                      id="practice-touch-bottom-deadzone-mask-hidden-switch"
+                      checked={!hideTouchBottomDeadzoneMaskInputValue}
+                      label={hideTouchBottomDeadzoneMaskInputValue ? '隐藏' : '显示'}
+                      onChange={(_, data) => setHideTouchBottomDeadzoneMaskInputValue(!Boolean(data?.checked))}
+                    />
+                    <p className="practice-setting-help">隐藏后防误触依然生效，只是不显示半透明禁区遮罩。</p>
                   </div>
                 </div>
               </DialogContent>
