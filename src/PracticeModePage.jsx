@@ -8,9 +8,10 @@ import {
   DialogSurface,
   DialogTitle,
   Input,
+  Select,
   Switch
 } from '@fluentui/react-components';
-import { DismissRegular } from '@fluentui/react-icons';
+import { DismissRegular, PauseRegular, PlayRegular } from '@fluentui/react-icons';
 import JSZip from 'jszip';
 import PracticeBreadcrumb from './practice-mode/PracticeBreadcrumb.jsx';
 import PracticeToolbar from './practice-mode/PracticeToolbar.jsx';
@@ -44,6 +45,7 @@ import {
   getAudioMimeType,
   getBranchOptions,
   getChartReferenceBpm,
+  getCourseOptions,
   getHitResult,
   getPreferredBranchSelection,
   isAudioPath,
@@ -54,7 +56,6 @@ import {
   pathDir,
   readText,
   resolveChartByBranch,
-  resolveMainCourse,
   resolvePlayableChart,
   resolveTimelineAudioSync,
   summarizeResults
@@ -67,6 +68,8 @@ const PRACTICE_TOUCH_DRUM_SCALE_STORAGE_KEY = 'taiko-rating.practice.touch-drum-
 const PRACTICE_TOUCH_BOTTOM_DEADZONE_STORAGE_KEY = 'taiko-rating.practice.touch-bottom-deadzone-px.v1';
 const PRACTICE_TOUCH_BOTTOM_DEADZONE_MASK_HIDDEN_STORAGE_KEY = 'taiko-rating.practice.touch-bottom-deadzone-mask-hidden.v1';
 const PRACTICE_DRIFT_MONITOR_VISIBLE_STORAGE_KEY = 'taiko-rating.practice.drift-monitor-visible.v1';
+const PRACTICE_GLOBAL_SPEED_MULTIPLIER_STORAGE_KEY = 'taiko-rating.practice.global-speed-multiplier.v1';
+const PRACTICE_SCROLL_SPEED_MULTIPLIER_STORAGE_KEY = 'taiko-rating.practice.scroll-speed-multiplier.v1';
 const DRIFT_MONITOR_UPDATE_MS = 180;
 const DRIFT_SMOOTH_FACTOR = 0.12;
 const DRIFT_CORRECTION_MIN_RATIO = 0.55;
@@ -87,6 +90,24 @@ const DRIFT_BASELINE_WARMUP_MS = 160;
 const DRIFT_BASELINE_WINDOW_MS = 2200;
 const DRIFT_BASELINE_MIN_SAMPLES = 12;
 const DRIFT_BASELINE_ADAPT_FACTOR = 0.1;
+
+const COURSE_LABEL_MAP = {
+  edit: '魔王里',
+  oni: '魔王',
+  hard: '困难',
+  normal: '普通',
+  easy: '简单'
+};
+
+const BRANCH_LABEL_MAP = {
+  normal: '普通谱面',
+  expert: '玄人谱面',
+  master: '达人谱面'
+};
+
+function roundToTwo(value) {
+  return Math.round(value * 100) / 100;
+}
 
 function PracticeModePage() {
   const fileInputRef = useRef(null);
@@ -130,6 +151,9 @@ function PracticeModePage() {
   const [songTitle, setSongTitle] = useState('');
   const [difficultyText, setDifficultyText] = useState('');
   const [baseChartForBranch, setBaseChartForBranch] = useState(null);
+  const [availableCourses, setAvailableCourses] = useState([]);
+  const [selectedCourseKey, setSelectedCourseKey] = useState('');
+  const [courseChartsByKey, setCourseChartsByKey] = useState({});
   const [availableBranches, setAvailableBranches] = useState([]);
   const [branchSelection, setBranchSelection] = useState('master');
   const [notes, setNotes] = useState([]);
@@ -150,6 +174,18 @@ function PracticeModePage() {
   const [audioMimeType, setAudioMimeType] = useState('');
   const [hitFxTick, setHitFxTick] = useState(0);
   const [clockDriftMs, setClockDriftMs] = useState(0);
+  const [globalSpeedMultiplier, setGlobalSpeedMultiplier] = useState(() => {
+    if (typeof window === 'undefined') return 1;
+    const raw = window.localStorage.getItem(PRACTICE_GLOBAL_SPEED_MULTIPLIER_STORAGE_KEY);
+    const parsed = Number.parseFloat(String(raw ?? '1'));
+    return Number.isFinite(parsed) ? roundToTwo(Math.max(0.1, Math.min(8, parsed))) : 1;
+  });
+  const [scrollSpeedMultiplier, setScrollSpeedMultiplier] = useState(() => {
+    if (typeof window === 'undefined') return 1;
+    const raw = window.localStorage.getItem(PRACTICE_SCROLL_SPEED_MULTIPLIER_STORAGE_KEY);
+    const parsed = Number.parseFloat(String(raw ?? '1'));
+    return Number.isFinite(parsed) ? roundToTwo(Math.max(0.1, Math.min(8, parsed))) : 1;
+  });
   const [isMobileToolbar, setIsMobileToolbar] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth <= MOBILE_TOOLBAR_BREAKPOINT : false
   ));
@@ -194,6 +230,7 @@ function PracticeModePage() {
     return raw === '1';
   });
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
+  const [isSpeedDialogOpen, setIsSpeedDialogOpen] = useState(false);
   const [compensationInputValue, setCompensationInputValue] = useState('0');
   const [touchDrumOffsetXInputValue, setTouchDrumOffsetXInputValue] = useState('0');
   const [touchDrumOffsetYInputValue, setTouchDrumOffsetYInputValue] = useState('0');
@@ -201,8 +238,110 @@ function PracticeModePage() {
   const [touchBottomDeadzoneInputValue, setTouchBottomDeadzoneInputValue] = useState('100');
   const [hideTouchBottomDeadzoneMaskInputValue, setHideTouchBottomDeadzoneMaskInputValue] = useState(false);
   const [showDriftMonitorInputValue, setShowDriftMonitorInputValue] = useState(false);
+  const [globalSpeedInputValue, setGlobalSpeedInputValue] = useState('1');
+  const [scrollSpeedInputValue, setScrollSpeedInputValue] = useState('1');
+  const [courseInputValue, setCourseInputValue] = useState('');
+  const [branchInputValue, setBranchInputValue] = useState('master');
+
+  const stopLoop = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+  }, []);
+
+  const stopAudioPlayback = useCallback(() => {
+    if (audioStartTimerRef.current) {
+      window.clearTimeout(audioStartTimerRef.current);
+      audioStartTimerRef.current = 0;
+    }
+    scheduledStartRef.current = 0;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current.muted = false;
+    }
+  }, []);
+
+  const pauseAudioPlayback = useCallback(() => {
+    if (audioStartTimerRef.current) {
+      window.clearTimeout(audioStartTimerRef.current);
+      audioStartTimerRef.current = 0;
+    }
+    scheduledStartRef.current = 0;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.muted = false;
+    }
+  }, []);
+
+  const resetPlayback = useCallback(() => {
+    stopLoop();
+    stopAudioPlayback();
+    hitFxRef.current = [];
+    judgeFxRef.current = [];
+    balloonFxRef.current = [];
+    hitNoteFxRef.current = [];
+    touchGuidePulseRef.current = [];
+    setIsPlaying(false);
+    setIsPaused(false);
+    setNowMs(-PRE_ROLL_MS);
+    pausedAtMsRef.current = -PRE_ROLL_MS;
+    missIgnoreBeforeMsRef.current = -Infinity;
+    suppressNotesBeforeMsRef.current = -Infinity;
+    hasUsedBarSeekRef.current = false;
+    setNotes((prev) => prev.map((note) => ({ ...note, judged: false, result: null, delta: null })));
+    setRollHitCounts({});
+    setRollBalloonHits(0);
+    setStreakHits(0);
+    setBalloons((prev) => prev.map((balloon) => ({
+      ...balloon,
+      remainingHits: balloon.requiredHits,
+      popped: false,
+      pulseAtMs: null
+    })));
+    driftEstimateMsRef.current = 0;
+    driftDisplayUpdateAtRef.current = 0;
+    driftBaselineMsRef.current = 0;
+    driftBaselineAppliedMsRef.current = 0;
+    driftBaselineAccumMsRef.current = 0;
+    driftBaselineSampleCountRef.current = 0;
+    driftBaselineLockedRef.current = false;
+    driftBaselineForcedAtBarStartRef.current = false;
+    driftBaselineForceTargetMsRef.current = Number.POSITIVE_INFINITY;
+    driftResidualIntegralMsRef.current = 0;
+    driftLastAudioElapsedMsRef.current = -1;
+    driftPersistentCorrectionMsRef.current = 0;
+    setClockDriftMs(0);
+    setHitFxTick((prev) => prev + 1);
+    setStatusText('已重置，点击开始进行练习。');
+  }, [stopLoop, stopAudioPlayback]);
+
+  const pauseForDialogOpen = useCallback(() => {
+    if (!isPlaying) return;
+    const current = nowMs;
+    pausedAtMsRef.current = current;
+    setNowMs(current);
+    setIsPlaying(false);
+    setIsPaused(true);
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    if (audioStartTimerRef.current) {
+      window.clearTimeout(audioStartTimerRef.current);
+      audioStartTimerRef.current = 0;
+    }
+    scheduledStartRef.current = 0;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.muted = false;
+    }
+    setStatusText('已暂停。');
+  }, [isPlaying, nowMs]);
 
   const openSettingsDialog = useCallback(() => {
+    pauseForDialogOpen();
     setCompensationInputValue(String(touchAudioLatencyCompensationMs));
     setTouchDrumOffsetXInputValue(String(touchDrumOffsetX));
     setTouchDrumOffsetYInputValue(String(touchDrumOffsetY));
@@ -218,12 +357,135 @@ function PracticeModePage() {
     touchDrumScalePercent,
     touchBottomDeadzonePx,
     isTouchBottomDeadzoneMaskHidden,
-    isDriftMonitorVisible
+    isDriftMonitorVisible,
+    pauseForDialogOpen
   ]);
 
   const closeSettingsDialog = useCallback(() => {
     setIsSettingsDialogOpen(false);
   }, []);
+
+  const openSpeedDialog = useCallback(() => {
+    pauseForDialogOpen();
+    setGlobalSpeedInputValue(globalSpeedMultiplier.toFixed(2));
+    setScrollSpeedInputValue(scrollSpeedMultiplier.toFixed(2));
+    const defaultCourseKey = selectedCourseKey || availableCourses[0]?.value || '';
+    const defaultBranch = branchSelection || availableBranches[0] || 'master';
+    setCourseInputValue(defaultCourseKey);
+    setBranchInputValue(defaultBranch);
+    setIsSpeedDialogOpen(true);
+  }, [globalSpeedMultiplier, scrollSpeedMultiplier, selectedCourseKey, availableCourses, branchSelection, availableBranches, pauseForDialogOpen]);
+
+  const closeSpeedDialog = useCallback(() => {
+    setIsSpeedDialogOpen(false);
+  }, []);
+
+  const handleSettingsDialogOpenChange = useCallback((_, data) => {
+    const nextOpen = Boolean(data?.open);
+    if (nextOpen) {
+      pauseForDialogOpen();
+    }
+    setIsSettingsDialogOpen(nextOpen);
+  }, [pauseForDialogOpen]);
+
+  const handleSpeedDialogOpenChange = useCallback((_, data) => {
+    const nextOpen = Boolean(data?.open);
+    if (nextOpen) {
+      pauseForDialogOpen();
+    }
+    setIsSpeedDialogOpen(nextOpen);
+  }, [pauseForDialogOpen]);
+
+  const saveSpeedSetting = useCallback(() => {
+    const parsedGlobal = Number.parseFloat(String(globalSpeedInputValue || '1'));
+    const parsedScroll = Number.parseFloat(String(scrollSpeedInputValue || '1'));
+    const safeGlobal = Number.isFinite(parsedGlobal) ? roundToTwo(Math.max(0.1, Math.min(8, parsedGlobal))) : 1;
+    const safeScroll = Number.isFinite(parsedScroll) ? roundToTwo(Math.max(0.1, Math.min(8, parsedScroll))) : 1;
+
+    const currentChartTime = isPaused ? pausedAtMsRef.current : nowMs;
+    const requestedCourseKey = courseInputValue || selectedCourseKey;
+    const requestedBranch = branchInputValue || branchSelection;
+
+    let nextCourseKey = selectedCourseKey;
+    let nextBaseChart = baseChartForBranch;
+    let nextAvailableBranches = availableBranches;
+    let nextBranchSelection = branchSelection;
+
+    if (requestedCourseKey && courseChartsByKey[requestedCourseKey]) {
+      nextCourseKey = requestedCourseKey;
+      nextBaseChart = courseChartsByKey[requestedCourseKey];
+      nextAvailableBranches = getBranchOptions(nextBaseChart);
+      nextBranchSelection = nextAvailableBranches.includes(requestedBranch)
+        ? requestedBranch
+        : getPreferredBranchSelection(nextAvailableBranches);
+    } else if (availableBranches.includes(requestedBranch)) {
+      nextBranchSelection = requestedBranch;
+    }
+
+    const didCourseChange = nextCourseKey !== selectedCourseKey;
+    const didBranchChange = nextBranchSelection !== branchSelection;
+    const didGlobalSpeedChange = Math.abs(safeGlobal - globalSpeedMultiplier) > 0.0001;
+    const shouldForceReset = didCourseChange || didBranchChange || didGlobalSpeedChange;
+
+    setGlobalSpeedMultiplier(safeGlobal);
+    setScrollSpeedMultiplier(safeScroll);
+
+    if (didCourseChange) {
+      setSelectedCourseKey(nextCourseKey);
+      setDifficultyText(nextCourseKey.toUpperCase());
+    }
+    if (nextBaseChart !== baseChartForBranch) {
+      setBaseChartForBranch(nextBaseChart);
+      setAvailableBranches(nextAvailableBranches);
+    }
+    if (didBranchChange) {
+      setBranchSelection(nextBranchSelection);
+    }
+    setCourseInputValue(nextCourseKey);
+    setBranchInputValue(nextBranchSelection);
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(PRACTICE_GLOBAL_SPEED_MULTIPLIER_STORAGE_KEY, String(safeGlobal));
+      window.localStorage.setItem(PRACTICE_SCROLL_SPEED_MULTIPLIER_STORAGE_KEY, String(safeScroll));
+    }
+
+    if (audioRef.current) {
+      audioRef.current.playbackRate = safeGlobal;
+    }
+
+    if (shouldForceReset) {
+      resetPlayback();
+    } else if (isPlaying) {
+      playStartRef.current = performance.now() - ((currentChartTime + touchAudioLatencyCompensationMs - audioSyncOffsetMs) / safeGlobal);
+      scheduledStartRef.current = 0;
+      setNowMs(currentChartTime);
+    } else if (isPaused) {
+      pausedAtMsRef.current = currentChartTime;
+      setNowMs(currentChartTime);
+    }
+
+    setGlobalSpeedInputValue(safeGlobal.toFixed(2));
+    setScrollSpeedInputValue(safeScroll.toFixed(2));
+
+    setIsSpeedDialogOpen(false);
+  }, [
+    globalSpeedInputValue,
+    scrollSpeedInputValue,
+    courseInputValue,
+    branchInputValue,
+    selectedCourseKey,
+    branchSelection,
+    availableBranches,
+    baseChartForBranch,
+    courseChartsByKey,
+    isPlaying,
+    isPaused,
+    nowMs,
+    touchAudioLatencyCompensationMs,
+    audioSyncOffsetMs,
+    globalSpeedMultiplier,
+    resetPlayback
+  ]);
 
   const saveCompensationSetting = useCallback(() => {
     const parsed = Number.parseFloat(String(compensationInputValue || '0'));
@@ -272,37 +534,9 @@ function PracticeModePage() {
   const summary = useMemo(() => summarizeResults(notes), [notes]);
   const ngCount = useMemo(() => summary.bad + summary.miss, [summary.bad, summary.miss]);
 
-  const stopLoop = useCallback(() => {
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-    }
-  }, []);
-
-  const stopAudioPlayback = useCallback(() => {
-    if (audioStartTimerRef.current) {
-      window.clearTimeout(audioStartTimerRef.current);
-      audioStartTimerRef.current = 0;
-    }
-    scheduledStartRef.current = 0;
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current.muted = false;
-    }
-  }, []);
-
-  const pauseAudioPlayback = useCallback(() => {
-    if (audioStartTimerRef.current) {
-      window.clearTimeout(audioStartTimerRef.current);
-      audioStartTimerRef.current = 0;
-    }
-    scheduledStartRef.current = 0;
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.muted = false;
-    }
-  }, []);
+  const effectiveScrollPxPerMs = useMemo(() => {
+    return scrollPxPerMs * scrollSpeedMultiplier;
+  }, [scrollPxPerMs, scrollSpeedMultiplier]);
 
   const getSfxContext = useCallback(async () => {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -743,48 +977,6 @@ function PracticeModePage() {
     });
   }, []);
 
-  const resetPlayback = useCallback(() => {
-    stopLoop();
-    stopAudioPlayback();
-    hitFxRef.current = [];
-    judgeFxRef.current = [];
-    balloonFxRef.current = [];
-    hitNoteFxRef.current = [];
-    touchGuidePulseRef.current = [];
-    setIsPlaying(false);
-    setIsPaused(false);
-    setNowMs(-PRE_ROLL_MS);
-    pausedAtMsRef.current = -PRE_ROLL_MS;
-    missIgnoreBeforeMsRef.current = -Infinity;
-    suppressNotesBeforeMsRef.current = -Infinity;
-    hasUsedBarSeekRef.current = false;
-    setNotes((prev) => prev.map((note) => ({ ...note, judged: false, result: null, delta: null })));
-    setRollHitCounts({});
-    setRollBalloonHits(0);
-    setStreakHits(0);
-    setBalloons((prev) => prev.map((balloon) => ({
-      ...balloon,
-      remainingHits: balloon.requiredHits,
-      popped: false,
-      pulseAtMs: null
-    })));
-    driftEstimateMsRef.current = 0;
-    driftDisplayUpdateAtRef.current = 0;
-    driftBaselineMsRef.current = 0;
-    driftBaselineAppliedMsRef.current = 0;
-    driftBaselineAccumMsRef.current = 0;
-    driftBaselineSampleCountRef.current = 0;
-    driftBaselineLockedRef.current = false;
-    driftBaselineForcedAtBarStartRef.current = false;
-    driftBaselineForceTargetMsRef.current = Number.POSITIVE_INFINITY;
-    driftResidualIntegralMsRef.current = 0;
-    driftLastAudioElapsedMsRef.current = -1;
-    driftPersistentCorrectionMsRef.current = 0;
-    setClockDriftMs(0);
-    setHitFxTick((prev) => prev + 1);
-    setStatusText('已重置，点击开始进行练习。');
-  }, [stopLoop, stopAudioPlayback]);
-
   const rebuildTimelineByBranch = useCallback((baseChart, selectedBranch) => {
     const resolvedChart = resolveChartByBranch(baseChart, selectedBranch);
     if (!resolvedChart) {
@@ -841,7 +1033,7 @@ function PracticeModePage() {
 
   const getCurrentChartTimeMs = useCallback(() => {
     const nowPerf = performance.now();
-    const perfClockMs = nowPerf - playStartRef.current + audioSyncOffsetMs - touchAudioLatencyCompensationMs;
+    const perfClockMs = (nowPerf - playStartRef.current) * globalSpeedMultiplier + audioSyncOffsetMs - touchAudioLatencyCompensationMs;
     let current = perfClockMs;
 
     if (audioRef.current && audioObjectUrl) {
@@ -959,7 +1151,7 @@ function PracticeModePage() {
     }
 
     return current;
-  }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs]);
+  }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs, globalSpeedMultiplier]);
 
   const runFrame = useCallback(() => {
     const current = getCurrentChartTimeMs();
@@ -1052,6 +1244,7 @@ function PracticeModePage() {
 
       audioRef.current.currentTime = 0;
       audioRef.current.muted = true;
+      audioRef.current.playbackRate = globalSpeedMultiplier;
       audioRef.current.play().then(() => {
         audioStartTimerRef.current = window.setTimeout(() => {
           if (!audioRef.current) return;
@@ -1067,7 +1260,7 @@ function PracticeModePage() {
       });
     }
     rafRef.current = requestAnimationFrame(runFrame);
-  }, [notes, chartStartOffsetMs, runFrame, stopLoop, stopAudioPlayback, audioObjectUrl, audioMimeType, getSfxContext]);
+  }, [notes, chartStartOffsetMs, runFrame, stopLoop, stopAudioPlayback, audioObjectUrl, audioMimeType, getSfxContext, globalSpeedMultiplier]);
 
   const pausePlayback = useCallback(() => {
     if (!isPlaying) return;
@@ -1157,13 +1350,14 @@ function PracticeModePage() {
       pendingResetAfterSeekRef.current = false;
     }
 
-    playStartRef.current = performance.now() - (resumeFromMs + touchAudioLatencyCompensationMs - audioSyncOffsetMs);
+    playStartRef.current = performance.now() - ((resumeFromMs + touchAudioLatencyCompensationMs - audioSyncOffsetMs) / globalSpeedMultiplier);
     scheduledStartRef.current = 0;
 
     if (audioRef.current && audioObjectUrl) {
       const nextAudioTime = Math.max(0, (resumeFromMs + touchAudioLatencyCompensationMs - audioSyncOffsetMs) / 1000);
       audioRef.current.currentTime = nextAudioTime;
       audioRef.current.muted = false;
+      audioRef.current.playbackRate = globalSpeedMultiplier;
       audioRef.current.play().catch(() => {
         setStatusText('音频播放被浏览器拦截，请再次点击“继续”重试。');
       });
@@ -1173,7 +1367,7 @@ function PracticeModePage() {
     setIsPlaying(true);
     setStatusText('继续播放。');
     rafRef.current = requestAnimationFrame(runFrame);
-  }, [isPaused, notes.length, chartStartOffsetMs, barLines, audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs, runFrame, startPlayback]);
+  }, [isPaused, notes.length, chartStartOffsetMs, barLines, audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs, runFrame, startPlayback, globalSpeedMultiplier]);
 
   const seekToChartTime = useCallback((targetMs) => {
     if (!Number.isFinite(targetMs)) return;
@@ -1188,10 +1382,10 @@ function PracticeModePage() {
     }
 
     if (isPlaying) {
-      playStartRef.current = performance.now() - (clamped + touchAudioLatencyCompensationMs - audioSyncOffsetMs);
+      playStartRef.current = performance.now() - ((clamped + touchAudioLatencyCompensationMs - audioSyncOffsetMs) / globalSpeedMultiplier);
       scheduledStartRef.current = 0;
     }
-  }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs, chartStartOffsetMs, durationMs, isPlaying]);
+  }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs, chartStartOffsetMs, durationMs, isPlaying, globalSpeedMultiplier]);
 
   const seekByBarLine = useCallback((direction) => {
     if (!notes.length || !isPaused) return;
@@ -1363,6 +1557,15 @@ function PracticeModePage() {
   }, [touchDrumOffsetX, touchDrumOffsetY, touchDrumScalePercent]);
 
   const triggerInputFeedback = useCallback((inputType) => {
+    if (!isPlaying) {
+      if (isPaused) {
+        resumePlayback();
+      } else if (notes.length) {
+        startPlayback();
+      }
+      return;
+    }
+
     const now = performance.now();
     touchGuidePulseRef.current = [
       ...touchGuidePulseRef.current.filter((pulse) => now - pulse.time <= TOUCH_GUIDE_VIBRATION_MS),
@@ -1371,7 +1574,7 @@ function PracticeModePage() {
     pushHitFlash(inputType);
     void playInputSfx(inputType);
     handleInput(inputType);
-  }, [pushHitFlash, playInputSfx, handleInput]);
+  }, [isPlaying, isPaused, notes.length, resumePlayback, startPlayback, pushHitFlash, playInputSfx, handleInput]);
 
   const handlePracticePointerDown = useCallback((event) => {
     const frame = event.currentTarget;
@@ -1416,8 +1619,13 @@ function PracticeModePage() {
     const isDon = dx * dx + dy * dy <= arc.radius * arc.radius;
 
     event.preventDefault();
+
     triggerInputFeedback(isDon ? 'don' : 'ka');
-  }, [getTouchArcGeometry, touchBottomDeadzonePx, triggerInputFeedback]);
+  }, [
+    getTouchArcGeometry,
+    touchBottomDeadzonePx,
+    triggerInputFeedback
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -1475,15 +1683,24 @@ function PracticeModePage() {
 
   const applyImportedTjaText = useCallback((tjaText, fileLabel, audioBlob = null) => {
     const parsed = parseTJA(tjaText);
-    const mainCourse = resolveMainCourse(parsed);
-    if (!mainCourse) {
+    const courseEntries = getCourseOptions(parsed);
+    if (!courseEntries.length) {
       throw new Error('未解析到任何有效难度。');
     }
 
-    const playableChart = resolvePlayableChart(mainCourse.chart);
-    if (!playableChart) {
+    const selectableCourses = courseEntries
+      .map((entry) => ({
+        ...entry,
+        playableChart: resolvePlayableChart(entry.chart)
+      }))
+      .filter((entry) => Boolean(entry.playableChart));
+
+    if (!selectableCourses.length) {
       throw new Error('未找到可游玩的单人谱面。');
     }
+
+    const initialCourse = selectableCourses[0];
+    const playableChart = initialCourse.playableChart;
 
     const branchOptions = getBranchOptions(playableChart);
     const initialBranchSelection = getPreferredBranchSelection(branchOptions);
@@ -1500,11 +1717,25 @@ function PracticeModePage() {
     replaceAudioObjectUrl(audioUrl);
     setAudioMimeType(audioBlob?.type || '');
 
+    const nextAvailableCourses = selectableCourses.map((entry) => ({
+      value: entry.normalizedKey,
+      label: COURSE_LABEL_MAP[entry.normalizedKey] || String(entry.originalKey || entry.normalizedKey).toUpperCase()
+    }));
+    const nextCourseChartsByKey = selectableCourses.reduce((acc, entry) => {
+      acc[entry.normalizedKey] = entry.playableChart;
+      return acc;
+    }, {});
+
     setSongTitle(playableChart.title || fileLabel.replace(/\.tja$/i, ''));
-    setDifficultyText(mainCourse.normalizedKey.toUpperCase());
+    setDifficultyText(initialCourse.normalizedKey.toUpperCase());
     setBaseChartForBranch(playableChart);
+    setAvailableCourses(nextAvailableCourses);
+    setSelectedCourseKey(initialCourse.normalizedKey);
+    setCourseChartsByKey(nextCourseChartsByKey);
     setAvailableBranches(branchOptions);
     setBranchSelection(initialBranchSelection);
+    setCourseInputValue(initialCourse.normalizedKey);
+    setBranchInputValue(initialBranchSelection);
     setChartStartOffsetMs(resolvedChartStartOffsetMs);
     setAudioSyncOffsetMs(nextAudioSyncOffsetMs);
     setNotes(timeline.notes);
@@ -1591,8 +1822,13 @@ function PracticeModePage() {
     } catch (error) {
       setStatusText(`导入失败：${error?.message || String(error)}`);
       setBaseChartForBranch(null);
+      setAvailableCourses([]);
+      setSelectedCourseKey('');
+      setCourseChartsByKey({});
       setAvailableBranches([]);
       setBranchSelection('master');
+      setCourseInputValue('');
+      setBranchInputValue('master');
       setChartStartOffsetMs(0);
       setAudioSyncOffsetMs(0);
       setNotes([]);
@@ -1627,23 +1863,23 @@ function PracticeModePage() {
         const noteScroll = Number.isFinite(note.scroll) ? note.scroll : 1;
         const direction = noteScroll < 0 ? -1 : 1;
         const speedScale = Math.max(0.05, Math.abs(noteScroll));
-        const x = LANE_TARGET_X + (note.timeMs - nowMs) * scrollPxPerMs * speedScale * direction;
+        const x = LANE_TARGET_X + (note.timeMs - nowMs) * effectiveScrollPxPerMs * speedScale * direction;
         return {
           ...note,
           x
         };
       })
       .filter((note) => note.x > -60 && note.x < 1800);
-  }, [notes, nowMs, scrollPxPerMs]);
+  }, [notes, nowMs, effectiveScrollPxPerMs]);
 
   const visibleBarLines = useMemo(() => {
     return barLines
       .map((barLine) => ({
         ...barLine,
-        x: LANE_TARGET_X + (barLine.timeMs - nowMs) * scrollPxPerMs
+        x: LANE_TARGET_X + (barLine.timeMs - nowMs) * effectiveScrollPxPerMs
       }))
       .filter((barLine) => barLine.x > -80 && barLine.x < 1920);
-  }, [barLines, nowMs, scrollPxPerMs]);
+  }, [barLines, nowMs, effectiveScrollPxPerMs]);
 
   const visibleRolls = useMemo(() => {
     return rolls
@@ -1654,8 +1890,8 @@ function PracticeModePage() {
         const endDirection = endScroll < 0 ? -1 : 1;
         const startSpeedScale = Math.max(0.05, Math.abs(startScroll));
         const endSpeedScale = Math.max(0.05, Math.abs(endScroll));
-        const xStart = LANE_TARGET_X + (roll.startMs - nowMs) * scrollPxPerMs * startSpeedScale * startDirection;
-        const xEnd = LANE_TARGET_X + (roll.endMs - nowMs) * scrollPxPerMs * endSpeedScale * endDirection;
+        const xStart = LANE_TARGET_X + (roll.startMs - nowMs) * effectiveScrollPxPerMs * startSpeedScale * startDirection;
+        const xEnd = LANE_TARGET_X + (roll.endMs - nowMs) * effectiveScrollPxPerMs * endSpeedScale * endDirection;
         return {
           ...roll,
           xStart,
@@ -1663,7 +1899,7 @@ function PracticeModePage() {
         };
       })
       .filter((roll) => roll.xEnd > -120 && roll.xStart < 1920);
-  }, [rolls, nowMs, scrollPxPerMs]);
+  }, [rolls, nowMs, effectiveScrollPxPerMs]);
 
   const visibleBalloons = useMemo(() => {
     return balloons
@@ -1673,8 +1909,8 @@ function PracticeModePage() {
         const balloonDirection = balloonScroll < 0 ? -1 : 1;
         const balloonSpeedScale = Math.max(0.05, Math.abs(balloonScroll));
         const approachX = nowMs > balloon.endMs
-          ? LANE_TARGET_X + (balloon.endMs - nowMs) * scrollPxPerMs * balloonSpeedScale * balloonDirection
-          : LANE_TARGET_X + (balloon.timeMs - nowMs) * scrollPxPerMs * balloonSpeedScale * balloonDirection;
+          ? LANE_TARGET_X + (balloon.endMs - nowMs) * effectiveScrollPxPerMs * balloonSpeedScale * balloonDirection
+          : LANE_TARGET_X + (balloon.timeMs - nowMs) * effectiveScrollPxPerMs * balloonSpeedScale * balloonDirection;
         const pulseElapsed = Number.isFinite(balloon.pulseAtMs) ? nowMs - balloon.pulseAtMs : Infinity;
         const pulseScale = pulseElapsed >= 0 && pulseElapsed <= BALLOON_PULSE_MS
           ? 1 + Math.sin((pulseElapsed / BALLOON_PULSE_MS) * Math.PI) * 0.18
@@ -1687,7 +1923,7 @@ function PracticeModePage() {
         };
       })
       .filter((balloon) => !balloon.popped && balloon.x > -220 && balloon.x < 1920);
-  }, [balloons, nowMs, scrollPxPerMs]);
+  }, [balloons, nowMs, effectiveScrollPxPerMs]);
 
   const activeRollForDisplay = useMemo(() => {
     return rolls.find((roll) => nowMs >= roll.startMs && nowMs <= roll.endMs + ROLL_COUNT_HOLD_MS) || null;
@@ -1699,6 +1935,12 @@ function PracticeModePage() {
     }
     return BRANCH_SCROLL_THEME[branchSelection] || BRANCH_SCROLL_THEME.normal;
   }, [availableBranches.length, branchSelection]);
+
+  const branchOptionsForDialog = useMemo(() => {
+    const courseKey = courseInputValue || selectedCourseKey;
+    const selectedCourseChart = courseChartsByKey[courseKey] || baseChartForBranch;
+    return getBranchOptions(selectedCourseChart);
+  }, [courseInputValue, selectedCourseKey, courseChartsByKey, baseChartForBranch]);
 
   const drawLaneCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1722,7 +1964,7 @@ function PracticeModePage() {
     ctx.scale(dpr, dpr);
 
     const statusBarHeight = 66;
-    const progressAreaHeight = 22;
+    const progressAreaHeight = 32;
     const baseLaneTop = statusBarHeight;
     const baseLaneBottom = Math.max(baseLaneTop + 120, height - progressAreaHeight);
     const baseLaneHeight = Math.max(120, baseLaneBottom - baseLaneTop);
@@ -1845,7 +2087,7 @@ function PracticeModePage() {
     const driftText = Number.isFinite(clockDriftMs)
       ? `延迟 ${clockDriftMs > 0 ? '+' : ''}${clockDriftMs}ms`
       : '延迟 --ms';
-    const laneInfoText = isDriftMonitorVisible ? `${progressText}  ${driftText}` : progressText;
+    const laneInfoText = isDriftMonitorVisible ? driftText : '';
 
     ctx.fillStyle = '#b83a10';
     if (stackOrangeAboveLane) {
@@ -1870,11 +2112,13 @@ function PracticeModePage() {
     ctx.textBaseline = 'middle';
     ctx.font = '900 18px "Microsoft YaHei", "Noto Sans SC", sans-serif';
     ctx.fillStyle = '#ffe7cb';
-    if (stackOrangeAboveLane) {
-      const progressX = Math.min(width - 180, drumCenterX + drumOuterRadius + 12);
-      ctx.fillText(laneInfoText, progressX, drumCenterY);
-    } else {
-      ctx.fillText(laneInfoText, 12, laneBottom - 16);
+    if (laneInfoText) {
+      if (stackOrangeAboveLane) {
+        const progressX = Math.min(width - 180, drumCenterX + drumOuterRadius + 12);
+        ctx.fillText(laneInfoText, progressX, drumCenterY);
+      } else {
+        ctx.fillText(laneInfoText, 12, laneBottom - 16);
+      }
     }
 
     ctx.fillStyle = scrollTheme.base;
@@ -2330,19 +2574,59 @@ function PracticeModePage() {
     const remainderTop = progressRegionTop + progressBandHeight;
     const remainderHeight = Math.max(0, height - remainderTop);
 
+    const globalSpeedLabel = `♬×${globalSpeedMultiplier.toFixed(2)}`;
+    const scrollSpeedLabel = `HS×${scrollSpeedMultiplier.toFixed(2)}`;
+
     ctx.fillStyle = '#202836';
     ctx.fillRect(0, progressRegionTop, width, progressBandHeight);
     if (remainderHeight > 0) {
       ctx.fillStyle = '#fff8ed';
       ctx.fillRect(0, remainderTop, width, remainderHeight);
     }
-    const progressBarHeight = 8;
+    const progressBarHeight = 14;
     const progressBarInset = Math.max(0, (progressBandHeight - progressBarHeight) / 2);
     const progressBarMarginX = progressBarInset;
     const progressBarY = progressRegionTop + progressBarInset;
-    const progressBarX = progressBarMarginX;
-    const progressTrackWidth = Math.max(40, width - progressBarMarginX * 2);
+    const badgeFontSize = 11;
+    const badgeHeight = Math.max(14, Math.min(progressBandHeight - 4, 16));
+    const badgePadX = 6;
+    const badgeGap = 4;
+    const badgeSideGap = 8;
+    ctx.font = `700 ${badgeFontSize}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+    const globalBadgeWidth = Math.ceil(ctx.measureText(globalSpeedLabel).width + badgePadX * 2);
+    const scrollBadgeWidth = Math.ceil(ctx.measureText(scrollSpeedLabel).width + badgePadX * 2);
+    const badgesTotalWidth = globalBadgeWidth + badgeGap + scrollBadgeWidth;
+    const maxBadgeBlockWidth = Math.max(0, width - progressBarMarginX * 2 - 60);
+    const canRenderBadges = progressBandHeight >= 16 && badgesTotalWidth <= maxBadgeBlockWidth;
+    const badgeBlockWidth = canRenderBadges ? badgesTotalWidth + badgeSideGap : 0;
+
+    const progressBarX = progressBarMarginX + badgeBlockWidth;
+    const progressTrackWidth = Math.max(40, width - progressBarMarginX - progressBarX);
     const progressFillWidth = progressTrackWidth * progressRatio;
+
+    if (canRenderBadges) {
+      const badgeY = progressRegionTop + Math.max(2, (progressBandHeight - badgeHeight) / 2);
+      let badgeX = progressBarMarginX;
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `700 ${badgeFontSize}px "Segoe UI", "Microsoft YaHei", sans-serif`;
+
+      ctx.fillStyle = 'rgba(44, 57, 78, 0.92)';
+      ctx.beginPath();
+      ctx.roundRect(badgeX, badgeY, globalBadgeWidth, badgeHeight, 999);
+      ctx.fill();
+      ctx.fillStyle = '#ffe7cb';
+      ctx.fillText(globalSpeedLabel, badgeX + globalBadgeWidth / 2, badgeY + badgeHeight / 2 + 0.5);
+
+      badgeX += globalBadgeWidth + badgeGap;
+      ctx.fillStyle = 'rgba(56, 72, 98, 0.92)';
+      ctx.beginPath();
+      ctx.roundRect(badgeX, badgeY, scrollBadgeWidth, badgeHeight, 999);
+      ctx.fill();
+      ctx.fillStyle = '#dff1ff';
+      ctx.fillText(scrollSpeedLabel, badgeX + scrollBadgeWidth / 2, badgeY + badgeHeight / 2 + 0.5);
+    }
 
     ctx.fillStyle = 'rgba(96, 112, 136, 0.34)';
     ctx.beginPath();
@@ -2358,6 +2642,39 @@ function PracticeModePage() {
       ctx.roundRect(progressBarX, progressBarY, progressFillWidth, progressBarHeight, 999);
       ctx.fill();
     }
+
+    const progressLabelX = progressBarX + progressTrackWidth / 2;
+    const progressLabelY = progressBarY + progressBarHeight / 2;
+    const progressLabelFont = '700 12px "Segoe UI", "Microsoft YaHei", sans-serif';
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(progressBarX, progressBarY, progressTrackWidth, progressBarHeight, 999);
+    ctx.clip();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = progressLabelFont;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(26, 32, 44, 0.85)';
+    ctx.strokeText(progressText, progressLabelX, progressLabelY + 0.5);
+    ctx.fillStyle = '#d8deea';
+    ctx.fillText(progressText, progressLabelX, progressLabelY + 0.5);
+
+    if (progressFillWidth > 0.5) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(progressBarX, progressBarY, progressFillWidth, progressBarHeight);
+      ctx.clip();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(71, 32, 14, 0.9)';
+      ctx.strokeText(progressText, progressLabelX, progressLabelY + 0.5);
+      ctx.fillStyle = '#fff6de';
+      ctx.fillText(progressText, progressLabelX, progressLabelY + 0.5);
+      ctx.restore();
+    }
+
+    ctx.restore();
 
     const touchGuideCanvas = touchGuideCanvasRef.current;
     if (touchGuideCanvas) {
@@ -2555,6 +2872,32 @@ function PracticeModePage() {
           }
         }
 
+        const shouldShowPlayOverlay = isPaused || (!isPlaying && notes.length > 0);
+        if (shouldShowPlayOverlay) {
+          guideCtx.fillStyle = 'rgba(10, 16, 26, 0.5)';
+          guideCtx.fillRect(0, 0, guideWidth, guideHeight);
+
+          const iconRadius = Math.max(20, Math.min(guideWidth, guideHeight) * 0.13);
+          const iconCenterX = guideWidth / 2;
+          const iconCenterY = guideHeight / 2;
+
+          const triangleWidth = iconRadius * 0.9;
+          const triangleHeight = iconRadius * 1.04;
+          const triangleLeft = iconCenterX - triangleWidth * 0.26;
+          guideCtx.fillStyle = '#f16b2b';
+          guideCtx.beginPath();
+          guideCtx.moveTo(triangleLeft, iconCenterY - triangleHeight / 2);
+          guideCtx.lineTo(triangleLeft, iconCenterY + triangleHeight / 2);
+          guideCtx.lineTo(triangleLeft + triangleWidth, iconCenterY);
+          guideCtx.closePath();
+          guideCtx.fill();
+
+          guideCtx.lineWidth = 2;
+          guideCtx.lineJoin = 'round';
+          guideCtx.strokeStyle = 'rgba(36, 45, 58, 0.95)';
+          guideCtx.stroke();
+        }
+
         guideCtx.restore();
       }
     }
@@ -2575,8 +2918,12 @@ function PracticeModePage() {
     ngCount,
     nowMs,
     durationMs,
+    globalSpeedMultiplier,
+    scrollSpeedMultiplier,
     clockDriftMs,
     isDriftMonitorVisible,
+    isPlaying,
+    isPaused,
     barLines,
     notes.length,
     getTouchArcGeometry,
@@ -2600,7 +2947,7 @@ function PracticeModePage() {
   }, [drawLaneCanvas]);
 
   const mainPlaybackLabel = isPlaying ? '暂停' : (isPaused ? '继续' : '开始');
-  const mainPlaybackIcon = isPlaying ? '⏸' : '▶';
+  const mainPlaybackIcon = isPlaying ? <PauseRegular /> : <PlayRegular />;
   const mainPlaybackAction = isPlaying ? pausePlayback : (isPaused ? resumePlayback : startPlayback);
   const mainPlaybackDisabled = !notes.length && !isPlaying;
 
@@ -2610,7 +2957,6 @@ function PracticeModePage() {
 
       <div className="table-wrapper practice-wrapper">
         <PracticeToolbar
-          isMobileToolbar={isMobileToolbar}
           onImportClick={() => fileInputRef.current?.click()}
           mainPlaybackAction={mainPlaybackAction}
           mainPlaybackDisabled={mainPlaybackDisabled}
@@ -2621,14 +2967,11 @@ function PracticeModePage() {
           onReset={resetPlayback}
           notesLength={notes.length}
           isPaused={isPaused}
+          onOpenSpeedDialog={openSpeedDialog}
           onOpenSettings={openSettingsDialog}
-          availableBranches={availableBranches}
-          branchSelection={branchSelection}
-          isPlaying={isPlaying}
-          onBranchSelectionChange={setBranchSelection}
         />
 
-        <Dialog open={isSettingsDialogOpen} onOpenChange={(_, data) => setIsSettingsDialogOpen(Boolean(data?.open))}>
+        <Dialog open={isSettingsDialogOpen} onOpenChange={handleSettingsDialogOpenChange}>
           <DialogSurface>
             <DialogBody className="practice-settings-dialog-body">
               <Button
@@ -2637,11 +2980,11 @@ function PracticeModePage() {
                 size="small"
                 shape="circular"
                 icon={<DismissRegular />}
-                aria-label="关闭设置"
-                title="关闭"
+                aria-label="关闭系统设置"
+                title="关闭系统设置"
                 onClick={closeSettingsDialog}
               />
-              <DialogTitle>设置</DialogTitle>
+              <DialogTitle>系统设置</DialogTitle>
               <DialogContent>
                 <div className="practice-settings-form">
                   <div className="practice-setting-item">
@@ -2729,6 +3072,97 @@ function PracticeModePage() {
               </DialogContent>
               <DialogActions>
                 <Button appearance="primary" onClick={saveCompensationSetting}>保存</Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+
+        <Dialog open={isSpeedDialogOpen} onOpenChange={handleSpeedDialogOpenChange}>
+          <DialogSurface>
+            <DialogBody className="practice-settings-dialog-body">
+              <Button
+                className="practice-settings-close-button"
+                appearance="subtle"
+                size="small"
+                shape="circular"
+                icon={<DismissRegular />}
+                aria-label="关闭游戏设置"
+                title="关闭游戏设置"
+                onClick={closeSpeedDialog}
+              />
+              <DialogTitle>游戏设置</DialogTitle>
+              <DialogContent>
+                <div className="practice-settings-form">
+                  <div className="practice-setting-item">
+                    <label className="practice-setting-label" htmlFor="practice-course-select">难度选择</label>
+                    <Select
+                      id="practice-course-select"
+                      value={courseInputValue}
+                      disabled={!availableCourses.length || isPlaying}
+                      onChange={(_, data) => {
+                        const nextCourseKey = String(data?.value || '');
+                        setCourseInputValue(nextCourseKey);
+                        const nextBranches = getBranchOptions(courseChartsByKey[nextCourseKey]);
+                        const safeBranch = nextBranches.includes(branchInputValue)
+                          ? branchInputValue
+                          : getPreferredBranchSelection(nextBranches);
+                        setBranchInputValue(safeBranch);
+                      }}
+                    >
+                      {availableCourses.map((course) => (
+                        <option key={course.value} value={course.value}>
+                          {course.label}
+                        </option>
+                      ))}
+                    </Select>
+                    <p className="practice-setting-help">默认顺序：魔王里 → 魔王 → 困难 → 普通 → 简单。</p>
+                  </div>
+
+                  <div className="practice-setting-item">
+                    <label className="practice-setting-label" htmlFor="practice-branch-select">谱面类型</label>
+                    <Select
+                      id="practice-branch-select"
+                      value={branchInputValue}
+                      disabled={!branchOptionsForDialog.length || isPlaying}
+                      onChange={(_, data) => setBranchInputValue(String(data?.value || ''))}
+                    >
+                      {branchOptionsForDialog.map((branch) => (
+                        <option key={branch} value={branch}>
+                          {BRANCH_LABEL_MAP[branch] || `${branch}谱面`}
+                        </option>
+                      ))}
+                    </Select>
+                    <p className="practice-setting-help">切换分歧谱面类型，播放中不可修改。</p>
+                  </div>
+
+                  <div className="practice-setting-item">
+                    <label className="practice-setting-label" htmlFor="practice-global-speed-input">整体变速倍率</label>
+                    <Input
+                      id="practice-global-speed-input"
+                      type="number"
+                      step={0.1}
+                      value={globalSpeedInputValue}
+                      onChange={(_, data) => setGlobalSpeedInputValue(String(data?.value ?? ''))}
+                      contentAfter="x"
+                    />
+                    <p className="practice-setting-help">默认 1。调整后音乐与谱面时钟同步加减速，形成整体变速体感。</p>
+                  </div>
+                  <div className="practice-setting-item">
+                    <label className="practice-setting-label" htmlFor="practice-scroll-speed-input">卷轴速度倍率</label>
+                    <Input
+                      id="practice-scroll-speed-input"
+                      type="number"
+                      step={0.1}
+                      value={scrollSpeedInputValue}
+                      onChange={(_, data) => setScrollSpeedInputValue(String(data?.value ?? ''))}
+                      contentAfter="x"
+                    />
+                    <p className="practice-setting-help">默认 1。仅改变卷速与间距，不改变音乐节奏和判定时机。</p>
+                  </div>
+                </div>
+              </DialogContent>
+              <DialogActions>
+                <Button appearance="primary" onClick={saveSpeedSetting}>保存</Button>
               </DialogActions>
             </DialogBody>
           </DialogSurface>

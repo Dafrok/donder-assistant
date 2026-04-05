@@ -10,9 +10,9 @@ function normalizeCourseKey(key) {
   return lower;
 }
 
-export function resolveMainCourse(parsed) {
+export function getCourseOptions(parsed) {
   const entries = Object.entries(parsed || {});
-  if (!entries.length) return null;
+  if (!entries.length) return [];
 
   const normalized = entries.map(([key, value]) => ({
     originalKey: key,
@@ -20,11 +20,28 @@ export function resolveMainCourse(parsed) {
     chart: value
   }));
 
+  const picked = [];
+  const used = new Set();
   for (const wanted of DIFF_PRIORITY) {
-    const hit = normalized.find((entry) => entry.normalizedKey === wanted);
-    if (hit) return hit;
+    const hit = normalized.find((entry) => entry.normalizedKey === wanted && !used.has(entry.originalKey));
+    if (hit) {
+      picked.push(hit);
+      used.add(hit.originalKey);
+    }
   }
-  return normalized[0];
+
+  for (const entry of normalized) {
+    if (used.has(entry.originalKey)) continue;
+    picked.push(entry);
+    used.add(entry.originalKey);
+  }
+
+  return picked;
+}
+
+export function resolveMainCourse(parsed) {
+  const options = getCourseOptions(parsed);
+  return options[0] || null;
 }
 
 export function resolvePlayableChart(chart) {
