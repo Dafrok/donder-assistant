@@ -70,8 +70,9 @@ const PRACTICE_DRIFT_MONITOR_VISIBLE_STORAGE_KEY = 'taiko-rating.practice.drift-
 const DRIFT_MONITOR_UPDATE_MS = 180;
 const DRIFT_SMOOTH_FACTOR = 0.12;
 const DRIFT_CORRECTION_MIN_RATIO = 0.55;
-const DRIFT_CORRECTION_MAX_RATIO = 0.96;
+const DRIFT_CORRECTION_MAX_RATIO = 0.99;
 const DRIFT_CORRECTION_RAMP_MS = 3500;
+const DRIFT_BASELINE_FORCE_DELAY_MS = 320;
 const MAX_DRIFT_SAMPLE_MS = 220;
 const MAX_DRIFT_CORRECTION_MS = 110;
 const DRIFT_BASELINE_WARMUP_MS = 160;
@@ -112,6 +113,7 @@ function PracticeModePage() {
   const driftBaselineSampleCountRef = useRef(0);
   const driftBaselineLockedRef = useRef(false);
   const driftBaselineForcedAtBarStartRef = useRef(false);
+  const driftBaselineForceTargetMsRef = useRef(Number.POSITIVE_INFINITY);
 
   const [, setStatusText] = useState('准备就绪：导入本地 TJA 后点击开始。按键：F/J=咚，D/K=咔。');
   const [songTitle, setSongTitle] = useState('');
@@ -752,6 +754,7 @@ function PracticeModePage() {
     driftBaselineSampleCountRef.current = 0;
     driftBaselineLockedRef.current = false;
     driftBaselineForcedAtBarStartRef.current = false;
+    driftBaselineForceTargetMsRef.current = Number.POSITIVE_INFINITY;
     setClockDriftMs(0);
     setHitFxTick((prev) => prev + 1);
     setStatusText('已重置，点击开始进行练习。');
@@ -776,6 +779,7 @@ function PracticeModePage() {
       suppressNotesBeforeMsRef.current = -Infinity;
       hasUsedBarSeekRef.current = false;
       driftBaselineForcedAtBarStartRef.current = false;
+      driftBaselineForceTargetMsRef.current = Number.POSITIVE_INFINITY;
       return;
     }
 
@@ -798,6 +802,10 @@ function PracticeModePage() {
     suppressNotesBeforeMsRef.current = -Infinity;
     hasUsedBarSeekRef.current = false;
     driftBaselineForcedAtBarStartRef.current = false;
+    const firstTimelineNoteMs = (timeline.notes || [])[0]?.timeMs;
+    driftBaselineForceTargetMsRef.current = Number.isFinite(firstTimelineNoteMs)
+      ? firstTimelineNoteMs + DRIFT_BASELINE_FORCE_DELAY_MS
+      : chartStartOffsetMs + DRIFT_BASELINE_FORCE_DELAY_MS;
   }, [chartStartOffsetMs]);
 
   const getCurrentChartTimeMs = useCallback(() => {
@@ -816,7 +824,12 @@ function PracticeModePage() {
         const smoothedDrift = driftEstimateMsRef.current + (rawDrift - driftEstimateMsRef.current) * DRIFT_SMOOTH_FACTOR;
         driftEstimateMsRef.current = smoothedDrift;
 
-        if (!driftBaselineForcedAtBarStartRef.current && current >= chartStartOffsetMs) {
+        const forceBaselineTargetMs = driftBaselineForceTargetMsRef.current;
+        if (
+          !driftBaselineForcedAtBarStartRef.current
+          && Number.isFinite(forceBaselineTargetMs)
+          && current >= forceBaselineTargetMs
+        ) {
           driftBaselineMsRef.current = smoothedDrift;
           driftBaselineAppliedMsRef.current = smoothedDrift;
           driftBaselineAccumMsRef.current = smoothedDrift;
@@ -871,7 +884,7 @@ function PracticeModePage() {
     }
 
     return current;
-  }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs, chartStartOffsetMs]);
+  }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs]);
 
   const runFrame = useCallback(() => {
     const current = getCurrentChartTimeMs();
@@ -924,6 +937,10 @@ function PracticeModePage() {
     driftBaselineSampleCountRef.current = 0;
     driftBaselineLockedRef.current = false;
     driftBaselineForcedAtBarStartRef.current = false;
+    const firstNoteMs = notes[0]?.timeMs;
+    driftBaselineForceTargetMsRef.current = Number.isFinite(firstNoteMs)
+      ? firstNoteMs + DRIFT_BASELINE_FORCE_DELAY_MS
+      : chartStartOffsetMs + DRIFT_BASELINE_FORCE_DELAY_MS;
     setClockDriftMs(0);
     setRollBalloonHits(0);
     setStreakHits(0);
@@ -972,7 +989,7 @@ function PracticeModePage() {
       });
     }
     rafRef.current = requestAnimationFrame(runFrame);
-  }, [notes.length, runFrame, stopLoop, stopAudioPlayback, audioObjectUrl, audioMimeType, getSfxContext]);
+  }, [notes, chartStartOffsetMs, runFrame, stopLoop, stopAudioPlayback, audioObjectUrl, audioMimeType, getSfxContext]);
 
   const pausePlayback = useCallback(() => {
     if (!isPlaying) return;
@@ -1416,6 +1433,10 @@ function PracticeModePage() {
     setBarLines(timeline.barLines || []);
     setRolls(timeline.rolls || []);
     setBalloons(timeline.balloons || []);
+    const firstTimelineNoteMs = (timeline.notes || [])[0]?.timeMs;
+    driftBaselineForceTargetMsRef.current = Number.isFinite(firstTimelineNoteMs)
+      ? firstTimelineNoteMs + DRIFT_BASELINE_FORCE_DELAY_MS
+      : resolvedChartStartOffsetMs + DRIFT_BASELINE_FORCE_DELAY_MS;
     setRollBalloonHits(0);
     setStreakHits(0);
     setDurationMs(timeline.durationMs);
@@ -1497,6 +1518,7 @@ function PracticeModePage() {
       setBarLines([]);
       setRolls([]);
       setBalloons([]);
+      driftBaselineForceTargetMsRef.current = Number.POSITIVE_INFINITY;
       setRollBalloonHits(0);
       setStreakHits(0);
       setDurationMs(0);
