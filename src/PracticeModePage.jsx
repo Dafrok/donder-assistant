@@ -1562,6 +1562,14 @@ function PracticeModePage() {
         resumePlayback();
       } else if (notes.length) {
         startPlayback();
+      } else {
+        const now = performance.now();
+        touchGuidePulseRef.current = [
+          ...touchGuidePulseRef.current.filter((pulse) => now - pulse.time <= TOUCH_GUIDE_VIBRATION_MS),
+          { time: now, type: inputType }
+        ];
+        pushHitFlash(inputType);
+        void playInputSfx(inputType);
       }
       return;
     }
@@ -2147,7 +2155,7 @@ function PracticeModePage() {
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.font = '900 20px "Microsoft YaHei", "Noto Sans SC", sans-serif';
+    ctx.font = '900 19px "Microsoft YaHei", "Noto Sans SC", sans-serif';
     const statusItems = [
       { text: `良 ${summary.perfect}`, color: '#ffd65c' },
       { text: `可 ${summary.good}`, color: '#ffffff' },
@@ -2874,28 +2882,45 @@ function PracticeModePage() {
 
         const shouldShowPlayOverlay = isPaused || (!isPlaying && notes.length > 0);
         if (shouldShowPlayOverlay) {
-          guideCtx.fillStyle = 'rgba(10, 16, 26, 0.5)';
+          const overlayGradient = guideCtx.createLinearGradient(0, 0, 0, guideHeight);
+          overlayGradient.addColorStop(0, 'rgba(8, 13, 22, 0.42)');
+          overlayGradient.addColorStop(1, 'rgba(10, 16, 26, 0.58)');
+          guideCtx.fillStyle = overlayGradient;
           guideCtx.fillRect(0, 0, guideWidth, guideHeight);
 
-          const iconRadius = Math.max(20, Math.min(guideWidth, guideHeight) * 0.13);
-          const iconCenterX = guideWidth / 2;
-          const iconCenterY = guideHeight / 2;
+          const iconRadius = Math.max(24, Math.min(44, Math.min(guideWidth, guideHeight) * 0.16));
+          const iconX = guideWidth / 2;
+          const iconY = guideHeight / 2;
 
-          const triangleWidth = iconRadius * 0.9;
-          const triangleHeight = iconRadius * 1.04;
-          const triangleLeft = iconCenterX - triangleWidth * 0.26;
-          guideCtx.fillStyle = '#f16b2b';
+          const iconShadow = guideCtx.createRadialGradient(iconX, iconY, iconRadius * 0.3, iconX, iconY, iconRadius * 1.6);
+          iconShadow.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
+          iconShadow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          guideCtx.fillStyle = iconShadow;
           guideCtx.beginPath();
-          guideCtx.moveTo(triangleLeft, iconCenterY - triangleHeight / 2);
-          guideCtx.lineTo(triangleLeft, iconCenterY + triangleHeight / 2);
-          guideCtx.lineTo(triangleLeft + triangleWidth, iconCenterY);
-          guideCtx.closePath();
+          guideCtx.arc(iconX, iconY, iconRadius * 1.6, 0, Math.PI * 2);
+          guideCtx.fill();
+
+          guideCtx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+          guideCtx.beginPath();
+          guideCtx.arc(iconX, iconY, iconRadius, 0, Math.PI * 2);
           guideCtx.fill();
 
           guideCtx.lineWidth = 2;
-          guideCtx.lineJoin = 'round';
-          guideCtx.strokeStyle = 'rgba(36, 45, 58, 0.95)';
+          guideCtx.strokeStyle = 'rgba(33, 43, 58, 0.64)';
+          guideCtx.beginPath();
+          guideCtx.arc(iconX, iconY, iconRadius, 0, Math.PI * 2);
           guideCtx.stroke();
+
+          const triangleW = iconRadius * 0.9;
+          const triangleH = iconRadius * 1.02;
+          const triangleLeft = iconX - triangleW * 0.32;
+          guideCtx.fillStyle = '#111111';
+          guideCtx.beginPath();
+          guideCtx.moveTo(triangleLeft, iconY - triangleH / 2);
+          guideCtx.lineTo(triangleLeft, iconY + triangleH / 2);
+          guideCtx.lineTo(triangleLeft + triangleW, iconY);
+          guideCtx.closePath();
+          guideCtx.fill();
         }
 
         guideCtx.restore();
