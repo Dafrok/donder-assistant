@@ -66,6 +66,12 @@ const PRACTICE_TOUCH_DRUM_OFFSET_Y_STORAGE_KEY = 'taiko-rating.practice.touch-dr
 const PRACTICE_TOUCH_DRUM_SCALE_STORAGE_KEY = 'taiko-rating.practice.touch-drum-scale-percent.v1';
 const PRACTICE_TOUCH_BOTTOM_DEADZONE_STORAGE_KEY = 'taiko-rating.practice.touch-bottom-deadzone-px.v1';
 const PRACTICE_TOUCH_BOTTOM_DEADZONE_MASK_HIDDEN_STORAGE_KEY = 'taiko-rating.practice.touch-bottom-deadzone-mask-hidden.v1';
+const PRACTICE_DRIFT_MONITOR_VISIBLE_STORAGE_KEY = 'taiko-rating.practice.drift-monitor-visible.v1';
+const DRIFT_MONITOR_UPDATE_MS = 180;
+const DRIFT_SMOOTH_FACTOR = 0.12;
+const DRIFT_CORRECTION_RATIO = 0.55;
+const MAX_DRIFT_SAMPLE_MS = 220;
+const MAX_DRIFT_CORRECTION_MS = 110;
 
 function PracticeModePage() {
   const fileInputRef = useRef(null);
@@ -92,6 +98,8 @@ function PracticeModePage() {
   const hitNoteFxRef = useRef([]);
   const touchGuidePulseRef = useRef([]);
   const hitFxRafRef = useRef(0);
+  const driftEstimateMsRef = useRef(0);
+  const driftDisplayUpdateAtRef = useRef(0);
 
   const [, setStatusText] = useState('准备就绪：导入本地 TJA 后点击开始。按键：F/J=咚，D/K=咔。');
   const [songTitle, setSongTitle] = useState('');
@@ -116,6 +124,7 @@ function PracticeModePage() {
   const [audioObjectUrl, setAudioObjectUrl] = useState('');
   const [audioMimeType, setAudioMimeType] = useState('');
   const [hitFxTick, setHitFxTick] = useState(0);
+  const [clockDriftMs, setClockDriftMs] = useState(0);
   const [isMobileToolbar, setIsMobileToolbar] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth <= MOBILE_TOOLBAR_BREAKPOINT : false
   ));
@@ -154,6 +163,11 @@ function PracticeModePage() {
     const raw = window.localStorage.getItem(PRACTICE_TOUCH_BOTTOM_DEADZONE_MASK_HIDDEN_STORAGE_KEY);
     return raw === '1';
   });
+  const [isDriftMonitorVisible, setIsDriftMonitorVisible] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const raw = window.localStorage.getItem(PRACTICE_DRIFT_MONITOR_VISIBLE_STORAGE_KEY);
+    return raw === '1';
+  });
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
   const [compensationInputValue, setCompensationInputValue] = useState('0');
   const [touchDrumOffsetXInputValue, setTouchDrumOffsetXInputValue] = useState('0');
@@ -161,6 +175,7 @@ function PracticeModePage() {
   const [touchDrumScaleInputValue, setTouchDrumScaleInputValue] = useState('100');
   const [touchBottomDeadzoneInputValue, setTouchBottomDeadzoneInputValue] = useState('100');
   const [hideTouchBottomDeadzoneMaskInputValue, setHideTouchBottomDeadzoneMaskInputValue] = useState(false);
+  const [showDriftMonitorInputValue, setShowDriftMonitorInputValue] = useState(false);
 
   const openSettingsDialog = useCallback(() => {
     setCompensationInputValue(String(touchAudioLatencyCompensationMs));
@@ -169,6 +184,7 @@ function PracticeModePage() {
     setTouchDrumScaleInputValue(String(touchDrumScalePercent));
     setTouchBottomDeadzoneInputValue(String(touchBottomDeadzonePx));
     setHideTouchBottomDeadzoneMaskInputValue(isTouchBottomDeadzoneMaskHidden);
+    setShowDriftMonitorInputValue(isDriftMonitorVisible);
     setIsSettingsDialogOpen(true);
   }, [
     touchAudioLatencyCompensationMs,
@@ -176,7 +192,8 @@ function PracticeModePage() {
     touchDrumOffsetY,
     touchDrumScalePercent,
     touchBottomDeadzonePx,
-    isTouchBottomDeadzoneMaskHidden
+    isTouchBottomDeadzoneMaskHidden,
+    isDriftMonitorVisible
   ]);
 
   const closeSettingsDialog = useCallback(() => {
@@ -200,6 +217,7 @@ function PracticeModePage() {
     setTouchDrumScalePercent(safeScale);
     setTouchBottomDeadzonePx(safeBottomDeadzone);
     setIsTouchBottomDeadzoneMaskHidden(hideTouchBottomDeadzoneMaskInputValue);
+    setIsDriftMonitorVisible(showDriftMonitorInputValue);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(PRACTICE_AUDIO_COMPENSATION_STORAGE_KEY, String(safeValue));
       window.localStorage.setItem(PRACTICE_TOUCH_DRUM_OFFSET_X_STORAGE_KEY, String(safeOffsetX));
@@ -210,6 +228,10 @@ function PracticeModePage() {
         PRACTICE_TOUCH_BOTTOM_DEADZONE_MASK_HIDDEN_STORAGE_KEY,
         hideTouchBottomDeadzoneMaskInputValue ? '1' : '0'
       );
+      window.localStorage.setItem(
+        PRACTICE_DRIFT_MONITOR_VISIBLE_STORAGE_KEY,
+        showDriftMonitorInputValue ? '1' : '0'
+      );
     }
     setIsSettingsDialogOpen(false);
   }, [
@@ -218,7 +240,8 @@ function PracticeModePage() {
     touchDrumOffsetYInputValue,
     touchDrumScaleInputValue,
     touchBottomDeadzoneInputValue,
-    hideTouchBottomDeadzoneMaskInputValue
+    hideTouchBottomDeadzoneMaskInputValue,
+    showDriftMonitorInputValue
   ]);
 
   const summary = useMemo(() => summarizeResults(notes), [notes]);
@@ -278,7 +301,7 @@ function PracticeModePage() {
       compressor.release.value = 0.11;
 
       const master = ctx.createGain();
-      master.gain.value = 0.85;
+      master.gain.value = 1.4;
       master.connect(compressor);
 
       const reverb = ctx.createConvolver();
@@ -709,6 +732,9 @@ function PracticeModePage() {
       popped: false,
       pulseAtMs: null
     })));
+    driftEstimateMsRef.current = 0;
+    driftDisplayUpdateAtRef.current = 0;
+    setClockDriftMs(0);
     setHitFxTick((prev) => prev + 1);
     setStatusText('已重置，点击开始进行练习。');
   }, [stopLoop, stopAudioPlayback]);
@@ -756,14 +782,29 @@ function PracticeModePage() {
 
   const getCurrentChartTimeMs = useCallback(() => {
     const nowPerf = performance.now();
-    let current = nowPerf - playStartRef.current + audioSyncOffsetMs - touchAudioLatencyCompensationMs;
+    const perfClockMs = nowPerf - playStartRef.current + audioSyncOffsetMs - touchAudioLatencyCompensationMs;
+    let current = perfClockMs;
 
     if (audioRef.current && audioObjectUrl) {
       // Keep using the pre-roll clock until the audio handoff timer finishes.
       if (scheduledStartRef.current) {
         current = nowPerf - scheduledStartRef.current + audioSyncOffsetMs - touchAudioLatencyCompensationMs;
       } else if (!audioRef.current.paused && Number.isFinite(audioRef.current.currentTime)) {
-        current = audioRef.current.currentTime * 1000 + audioSyncOffsetMs - touchAudioLatencyCompensationMs;
+        const audioClockMs = audioRef.current.currentTime * 1000 + audioSyncOffsetMs - touchAudioLatencyCompensationMs;
+        const rawDrift = Math.max(-MAX_DRIFT_SAMPLE_MS, Math.min(MAX_DRIFT_SAMPLE_MS, audioClockMs - perfClockMs));
+        const smoothedDrift = driftEstimateMsRef.current + (rawDrift - driftEstimateMsRef.current) * DRIFT_SMOOTH_FACTOR;
+        driftEstimateMsRef.current = smoothedDrift;
+
+        const correctionMs = Math.max(
+          -MAX_DRIFT_CORRECTION_MS,
+          Math.min(MAX_DRIFT_CORRECTION_MS, smoothedDrift * DRIFT_CORRECTION_RATIO)
+        );
+        current = perfClockMs + correctionMs;
+
+        if (nowPerf - driftDisplayUpdateAtRef.current >= DRIFT_MONITOR_UPDATE_MS) {
+          driftDisplayUpdateAtRef.current = nowPerf;
+          setClockDriftMs(Math.round(smoothedDrift));
+        }
       }
     }
 
@@ -813,6 +854,9 @@ function PracticeModePage() {
     setIsPlaying(true);
     setIsPaused(false);
     setNowMs(-PRE_ROLL_MS);
+    driftEstimateMsRef.current = 0;
+    driftDisplayUpdateAtRef.current = 0;
+    setClockDriftMs(0);
     setRollBalloonHits(0);
     setStreakHits(0);
     setRollHitCounts({});
@@ -1612,6 +1656,10 @@ function PracticeModePage() {
     const progressText = totalBars > 0
       ? `${progressPercent}%  ${currentBar}/${totalBars} 小节`
       : `${progressPercent}%  -/- 小节`;
+    const driftText = Number.isFinite(clockDriftMs)
+      ? `偏差 ${clockDriftMs > 0 ? '+' : ''}${clockDriftMs}ms`
+      : '偏差 --ms';
+    const laneInfoText = isDriftMonitorVisible ? `${progressText}  ${driftText}` : progressText;
 
     ctx.fillStyle = '#b83a10';
     if (stackOrangeAboveLane) {
@@ -1638,9 +1686,9 @@ function PracticeModePage() {
     ctx.fillStyle = '#ffe7cb';
     if (stackOrangeAboveLane) {
       const progressX = Math.min(width - 180, drumCenterX + drumOuterRadius + 12);
-      ctx.fillText(progressText, progressX, drumCenterY);
+      ctx.fillText(laneInfoText, progressX, drumCenterY);
     } else {
-      ctx.fillText(progressText, 12, laneBottom - 16);
+      ctx.fillText(laneInfoText, 12, laneBottom - 16);
     }
 
     ctx.fillStyle = scrollTheme.base;
@@ -2314,6 +2362,8 @@ function PracticeModePage() {
     ngCount,
     nowMs,
     durationMs,
+    clockDriftMs,
+    isDriftMonitorVisible,
     barLines,
     notes.length,
     getTouchArcGeometry,
@@ -2450,6 +2500,17 @@ function PracticeModePage() {
                       onChange={(_, data) => setHideTouchBottomDeadzoneMaskInputValue(!Boolean(data?.checked))}
                     />
                     <p className="practice-setting-help">隐藏后防误触依然生效，只是不显示半透明禁区遮罩。</p>
+                  </div>
+
+                  <div className="practice-setting-item">
+                    <label className="practice-setting-label" htmlFor="practice-drift-monitor-visible-switch">实时偏差显示</label>
+                    <Switch
+                      id="practice-drift-monitor-visible-switch"
+                      checked={showDriftMonitorInputValue}
+                      label={showDriftMonitorInputValue ? '显示' : '隐藏'}
+                      onChange={(_, data) => setShowDriftMonitorInputValue(Boolean(data?.checked))}
+                    />
+                    <p className="practice-setting-help">显示后会在进度旁标注当前音画偏差毫秒值（用于校准和观察漂移）。</p>
                   </div>
                 </div>
               </DialogContent>
