@@ -70,9 +70,13 @@ const PRACTICE_DRIFT_MONITOR_VISIBLE_STORAGE_KEY = 'taiko-rating.practice.drift-
 const DRIFT_MONITOR_UPDATE_MS = 180;
 const DRIFT_SMOOTH_FACTOR = 0.12;
 const DRIFT_CORRECTION_MIN_RATIO = 0.55;
-const DRIFT_CORRECTION_MAX_RATIO = 0.99;
+const DRIFT_CORRECTION_MAX_RATIO = 1.0;
 const DRIFT_CORRECTION_RAMP_MS = 3500;
 const DRIFT_BASELINE_FORCE_DELAY_MS = 320;
+const DRIFT_INTEGRAL_ENABLE_AFTER_MS = 900;
+const DRIFT_INTEGRAL_GAIN_PER_SEC = 0.38;
+const DRIFT_INTEGRAL_LEAK_PER_SEC = 0.08;
+const DRIFT_INTEGRAL_MAX_MS = 26;
 const MAX_DRIFT_SAMPLE_MS = 220;
 const MAX_DRIFT_CORRECTION_MS = 110;
 const DRIFT_BASELINE_WARMUP_MS = 160;
@@ -114,6 +118,8 @@ function PracticeModePage() {
   const driftBaselineLockedRef = useRef(false);
   const driftBaselineForcedAtBarStartRef = useRef(false);
   const driftBaselineForceTargetMsRef = useRef(Number.POSITIVE_INFINITY);
+  const driftResidualIntegralMsRef = useRef(0);
+  const driftLastAudioElapsedMsRef = useRef(-1);
 
   const [, setStatusText] = useState('准备就绪：导入本地 TJA 后点击开始。按键：F/J=咚，D/K=咔。');
   const [songTitle, setSongTitle] = useState('');
@@ -755,6 +761,8 @@ function PracticeModePage() {
     driftBaselineLockedRef.current = false;
     driftBaselineForcedAtBarStartRef.current = false;
     driftBaselineForceTargetMsRef.current = Number.POSITIVE_INFINITY;
+    driftResidualIntegralMsRef.current = 0;
+    driftLastAudioElapsedMsRef.current = -1;
     setClockDriftMs(0);
     setHitFxTick((prev) => prev + 1);
     setStatusText('已重置，点击开始进行练习。');
@@ -780,6 +788,8 @@ function PracticeModePage() {
       hasUsedBarSeekRef.current = false;
       driftBaselineForcedAtBarStartRef.current = false;
       driftBaselineForceTargetMsRef.current = Number.POSITIVE_INFINITY;
+      driftResidualIntegralMsRef.current = 0;
+      driftLastAudioElapsedMsRef.current = -1;
       return;
     }
 
@@ -806,6 +816,8 @@ function PracticeModePage() {
     driftBaselineForceTargetMsRef.current = Number.isFinite(firstTimelineNoteMs)
       ? firstTimelineNoteMs + DRIFT_BASELINE_FORCE_DELAY_MS
       : chartStartOffsetMs + DRIFT_BASELINE_FORCE_DELAY_MS;
+    driftResidualIntegralMsRef.current = 0;
+    driftLastAudioElapsedMsRef.current = -1;
   }, [chartStartOffsetMs]);
 
   const getCurrentChartTimeMs = useCallback(() => {
@@ -871,9 +883,27 @@ function PracticeModePage() {
           -MAX_DRIFT_CORRECTION_MS,
           Math.min(MAX_DRIFT_CORRECTION_MS, residualDrift * correctionRatio)
         );
+        let integralCorrectionMs = driftResidualIntegralMsRef.current;
+        const prevAudioElapsedMs = driftLastAudioElapsedMsRef.current;
+        const deltaAudioMs = prevAudioElapsedMs >= 0
+          ? Math.max(0, Math.min(120, audioElapsedMs - prevAudioElapsedMs))
+          : 0;
+        driftLastAudioElapsedMsRef.current = audioElapsedMs;
+        if (deltaAudioMs > 0) {
+          const dt = deltaAudioMs / 1000;
+          driftResidualIntegralMsRef.current -= driftResidualIntegralMsRef.current * DRIFT_INTEGRAL_LEAK_PER_SEC * dt;
+          if (audioElapsedMs >= DRIFT_INTEGRAL_ENABLE_AFTER_MS && driftBaselineForcedAtBarStartRef.current) {
+            driftResidualIntegralMsRef.current += residualDrift * DRIFT_INTEGRAL_GAIN_PER_SEC * dt;
+          }
+          driftResidualIntegralMsRef.current = Math.max(
+            -DRIFT_INTEGRAL_MAX_MS,
+            Math.min(DRIFT_INTEGRAL_MAX_MS, driftResidualIntegralMsRef.current)
+          );
+          integralCorrectionMs = driftResidualIntegralMsRef.current;
+        }
         // Apply learned baseline directly so fixed device offset truly affects chart clock,
-        // then use capped residual correction for small runtime drift.
-        current = perfClockMs + driftBaselineAppliedMsRef.current + residualCorrectionMs;
+        // then use capped residual correction and a bounded integral term to remove steady-state bias.
+        current = perfClockMs + driftBaselineAppliedMsRef.current + residualCorrectionMs + integralCorrectionMs;
 
         if (nowPerf - driftDisplayUpdateAtRef.current >= DRIFT_MONITOR_UPDATE_MS) {
           driftDisplayUpdateAtRef.current = nowPerf;
@@ -941,6 +971,8 @@ function PracticeModePage() {
     driftBaselineForceTargetMsRef.current = Number.isFinite(firstNoteMs)
       ? firstNoteMs + DRIFT_BASELINE_FORCE_DELAY_MS
       : chartStartOffsetMs + DRIFT_BASELINE_FORCE_DELAY_MS;
+    driftResidualIntegralMsRef.current = 0;
+    driftLastAudioElapsedMsRef.current = -1;
     setClockDriftMs(0);
     setRollBalloonHits(0);
     setStreakHits(0);
@@ -1437,6 +1469,8 @@ function PracticeModePage() {
     driftBaselineForceTargetMsRef.current = Number.isFinite(firstTimelineNoteMs)
       ? firstTimelineNoteMs + DRIFT_BASELINE_FORCE_DELAY_MS
       : resolvedChartStartOffsetMs + DRIFT_BASELINE_FORCE_DELAY_MS;
+    driftResidualIntegralMsRef.current = 0;
+    driftLastAudioElapsedMsRef.current = -1;
     setRollBalloonHits(0);
     setStreakHits(0);
     setDurationMs(timeline.durationMs);
@@ -1519,6 +1553,8 @@ function PracticeModePage() {
       setRolls([]);
       setBalloons([]);
       driftBaselineForceTargetMsRef.current = Number.POSITIVE_INFINITY;
+      driftResidualIntegralMsRef.current = 0;
+      driftLastAudioElapsedMsRef.current = -1;
       setRollBalloonHits(0);
       setStreakHits(0);
       setDurationMs(0);
