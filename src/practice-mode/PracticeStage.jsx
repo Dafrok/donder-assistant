@@ -2,7 +2,6 @@ import React from 'react';
 
 function PracticeStage({
   onPointerDown,
-  onTouchStart,
   canvasRef,
   touchGuideCanvasRef,
   fileInputRef,
@@ -10,7 +9,7 @@ function PracticeStage({
 }) {
   return (
     <>
-      <div className="practice-frame-wrap" onPointerDown={onPointerDown} onTouchStart={onTouchStart}>
+      <div className="practice-frame-wrap" onPointerDown={onPointerDown}>
         <canvas ref={canvasRef} className="practice-lane-canvas" aria-label="最小可玩轨道（Canvas 2D）" />
         <div className="practice-touch-zone" aria-label="触屏打鼓区">
           <canvas ref={touchGuideCanvasRef} className="practice-touch-guide-canvas" aria-hidden="true" />

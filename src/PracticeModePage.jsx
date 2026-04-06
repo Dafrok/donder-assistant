@@ -135,10 +135,6 @@ function PracticeModePage() {
   const balloonFxRef = useRef([]);
   const hitNoteFxRef = useRef([]);
   const touchGuidePulseRef = useRef([]);
-  const notesRef = useRef([]);
-  const pendingInputQueueRef = useRef([]);
-  const pendingFeedbackQueueRef = useRef([]);
-  const lastTouchLikeInputRef = useRef({ time: -Infinity, x: 0, y: 0 });
   const hitFxRafRef = useRef(0);
   const driftEstimateMsRef = useRef(0);
   const driftDisplayUpdateAtRef = useRef(0);
@@ -248,10 +244,6 @@ function PracticeModePage() {
   const [scrollSpeedInputValue, setScrollSpeedInputValue] = useState('1');
   const [courseInputValue, setCourseInputValue] = useState('');
   const [branchInputValue, setBranchInputValue] = useState('master');
-
-  useEffect(() => {
-    notesRef.current = notes;
-  }, [notes]);
 
   const stopLoop = useCallback(() => {
     if (rafRef.current) {
@@ -1182,101 +1174,8 @@ function PracticeModePage() {
     return current;
   }, [audioObjectUrl, audioSyncOffsetMs, touchAudioLatencyCompensationMs, globalSpeedMultiplier]);
 
-  const handleInputAtTime = useCallback((inputType, inputTimeMs) => {
-    if (!isPlaying) return;
-    const current = Number.isFinite(inputTimeMs) ? inputTimeMs : getCurrentChartTimeMs();
-    if (current < suppressNotesBeforeMsRef.current) return;
-
-    if (inputType === 'don') {
-      const activeIndex = balloons.findIndex((balloon) =>
-        !balloon.popped && current >= balloon.timeMs && current <= balloon.endMs && balloon.remainingHits > 0
-      );
-      if (activeIndex >= 0) {
-        const currentBalloon = balloons[activeIndex];
-        const updated = [...balloons];
-        const nextHits = Math.max(0, currentBalloon.remainingHits - 1);
-        updated[activeIndex] = {
-          ...currentBalloon,
-          remainingHits: nextHits,
-          popped: nextHits <= 0,
-          pulseAtMs: current
-        };
-        setBalloons(updated);
-        setRollBalloonHits((prev) => prev + 1);
-        if (nextHits <= 0) {
-          pushBalloonBurst();
-        }
-      }
-    }
-
-    const activeRoll = rolls.find((roll) => current >= roll.startMs && current <= roll.endMs);
-    if (activeRoll) {
-      setRollHitCounts((prev) => ({
-        ...prev,
-        [activeRoll.id]: (prev[activeRoll.id] || 0) + 1
-      }));
-      setRollBalloonHits((prev) => {
-        const nextCount = prev + 1;
-        pushRollComboFeedback(nextCount);
-        return nextCount;
-      });
-    }
-
-    const sourceNotes = notesRef.current || [];
-    const index = findBestCandidate(sourceNotes, current, inputType, suppressNotesBeforeMsRef.current);
-    if (index < 0) return;
-
-    const note = sourceNotes[index];
-    const delta = current - note.timeMs;
-    const result = getHitResult(Math.abs(delta));
-    if (!result) return;
-
-    if (result === 'perfect' || result === 'good') {
-      setStreakHits((prev) => prev + 1);
-    } else {
-      setStreakHits(0);
-    }
-
-    const next = [...sourceNotes];
-    next[index] = {
-      ...note,
-      judged: true,
-      result,
-      delta
-    };
-    notesRef.current = next;
-    setNotes(next);
-    if (result === 'perfect' || result === 'good') {
-      pushHitNoteFx(note);
-    }
-    pushJudgeFeedback(result, delta);
-  }, [isPlaying, getCurrentChartTimeMs, balloons, pushBalloonBurst, rolls, pushRollComboFeedback, pushHitNoteFx, pushJudgeFeedback]);
-
   const runFrame = useCallback(() => {
     const current = getCurrentChartTimeMs();
-
-    const queuedInputs = pendingInputQueueRef.current.splice(0, pendingInputQueueRef.current.length);
-    if (queuedInputs.length) {
-      for (const queuedInput of queuedInputs) {
-        handleInputAtTime(queuedInput.inputType, queuedInput.chartTimeMs);
-      }
-    }
-
-    const queuedFeedbacks = pendingFeedbackQueueRef.current.splice(0, pendingFeedbackQueueRef.current.length);
-    if (queuedFeedbacks.length) {
-      const nowPerf = performance.now();
-      const activePulses = touchGuidePulseRef.current.filter((pulse) => nowPerf - pulse.time <= TOUCH_GUIDE_VIBRATION_MS);
-      for (const feedback of queuedFeedbacks) {
-        activePulses.push({
-          time: Number.isFinite(feedback.time) ? feedback.time : nowPerf,
-          type: feedback.inputType
-        });
-        pushHitFlash(feedback.inputType);
-        void playInputSfx(feedback.inputType);
-      }
-      touchGuidePulseRef.current = activePulses;
-    }
-
     const now = performance.now();
     hitFxRef.current = hitFxRef.current.filter((fx) => now - fx.time <= HIT_FLASH_MS);
     judgeFxRef.current = judgeFxRef.current.filter((fx) => now - fx.time <= JUDGE_FEEDBACK_MS);
@@ -1303,7 +1202,7 @@ function PracticeModePage() {
     }
 
     rafRef.current = requestAnimationFrame(runFrame);
-  }, [durationMs, stopLoop, stopAudioPlayback, getCurrentChartTimeMs, handleInputAtTime, pushHitFlash, playInputSfx]);
+  }, [durationMs, stopLoop, stopAudioPlayback, getCurrentChartTimeMs]);
 
   const startPlayback = useCallback(() => {
     if (!notes.length) {
@@ -1349,9 +1248,6 @@ function PracticeModePage() {
     balloonFxRef.current = [];
     hitNoteFxRef.current = [];
     touchGuidePulseRef.current = [];
-    pendingInputQueueRef.current = [];
-    pendingFeedbackQueueRef.current = [];
-    lastTouchLikeInputRef.current = { time: -Infinity, x: 0, y: 0 };
     setHitFxTick((prev) => prev + 1);
     pausedAtMsRef.current = -PRE_ROLL_MS;
     pendingResetAfterSeekRef.current = false;
@@ -1591,6 +1487,74 @@ function PracticeModePage() {
     }
   }, [notes.length, chartStartOffsetMs, barLines, durationMs, isPlaying, isPaused, getCurrentChartTimeMs, nowMs, seekToChartTime]);
 
+  const handleInput = useCallback((inputType) => {
+    if (!isPlaying) return;
+    const current = getCurrentChartTimeMs();
+    if (current < suppressNotesBeforeMsRef.current) return;
+
+    if (inputType === 'don') {
+      const activeIndex = balloons.findIndex((balloon) =>
+        !balloon.popped && current >= balloon.timeMs && current <= balloon.endMs && balloon.remainingHits > 0
+      );
+      if (activeIndex >= 0) {
+        const currentBalloon = balloons[activeIndex];
+        const updated = [...balloons];
+        const nextHits = Math.max(0, currentBalloon.remainingHits - 1);
+        updated[activeIndex] = {
+          ...currentBalloon,
+          remainingHits: nextHits,
+          popped: nextHits <= 0,
+          pulseAtMs: current
+        };
+        setBalloons(updated);
+        setRollBalloonHits((prev) => prev + 1);
+        if (nextHits <= 0) {
+          pushBalloonBurst();
+        }
+      }
+    }
+
+    const activeRoll = rolls.find((roll) => current >= roll.startMs && current <= roll.endMs);
+    if (activeRoll) {
+      setRollHitCounts((prev) => ({
+        ...prev,
+        [activeRoll.id]: (prev[activeRoll.id] || 0) + 1
+      }));
+      setRollBalloonHits((prev) => {
+        const nextCount = prev + 1;
+        pushRollComboFeedback(nextCount);
+        return nextCount;
+      });
+    }
+
+    const index = findBestCandidate(notes, current, inputType, suppressNotesBeforeMsRef.current);
+    if (index < 0) return;
+
+    const note = notes[index];
+    const delta = current - note.timeMs;
+    const result = getHitResult(Math.abs(delta));
+    if (!result) return;
+
+    if (result === 'perfect' || result === 'good') {
+      setStreakHits((prev) => prev + 1);
+    } else {
+      setStreakHits(0);
+    }
+
+    const next = [...notes];
+    next[index] = {
+      ...note,
+      judged: true,
+      result,
+      delta
+    };
+    setNotes(next);
+    if (result === 'perfect' || result === 'good') {
+      pushHitNoteFx(note);
+    }
+    pushJudgeFeedback(result, delta);
+  }, [isPlaying, getCurrentChartTimeMs, notes, pushJudgeFeedback, pushRollComboFeedback, pushHitNoteFx, balloons, pushBalloonBurst, rolls]);
+
   const getTouchArcGeometry = useCallback((zoneWidth, zoneHeight) => {
     const width = Math.max(1, zoneWidth);
     const height = Math.max(1, zoneHeight);
@@ -1631,50 +1595,42 @@ function PracticeModePage() {
       return;
     }
 
-    pendingInputQueueRef.current.push({
-      inputType,
-      chartTimeMs: getCurrentChartTimeMs()
-    });
-    pendingFeedbackQueueRef.current.push({
-      inputType,
-      time: performance.now()
-    });
-  }, [isPlaying, isPaused, notes.length, resumePlayback, startPlayback, pushHitFlash, playInputSfx, getCurrentChartTimeMs]);
-
-  const isLikelyDuplicateTouchLikeInput = useCallback((clientX, clientY) => {
     const now = performance.now();
-    const last = lastTouchLikeInputRef.current;
-    const dt = now - last.time;
-    const dx = clientX - last.x;
-    const dy = clientY - last.y;
-    const duplicate = dt >= 0 && dt <= 45 && dx * dx + dy * dy <= 22 * 22;
-    lastTouchLikeInputRef.current = { time: now, x: clientX, y: clientY };
-    return duplicate;
-  }, []);
+    touchGuidePulseRef.current = [
+      ...touchGuidePulseRef.current.filter((pulse) => now - pulse.time <= TOUCH_GUIDE_VIBRATION_MS),
+      { time: now, type: inputType }
+    ];
+    pushHitFlash(inputType);
+    void playInputSfx(inputType);
+    handleInput(inputType);
+  }, [isPlaying, isPaused, notes.length, resumePlayback, startPlayback, pushHitFlash, playInputSfx, handleInput]);
 
-  const handlePracticeTouchPoint = useCallback((frame, clientX, clientY) => {
-    if (!frame) return false;
+  const handlePracticePointerDown = useCallback((event) => {
+    const frame = event.currentTarget;
+    if (!frame) return;
     const touchCanvasRect = touchGuideCanvasRef.current?.getBoundingClientRect?.();
-    if (!touchCanvasRect) return false;
+    if (!touchCanvasRect) return;
 
+    // Only touch interactions inside the touch-guide canvas should trigger drum feedback.
     const isInsideTouchZone = (
-      clientX >= touchCanvasRect.left &&
-      clientX <= touchCanvasRect.right &&
-      clientY >= touchCanvasRect.top &&
-      clientY <= touchCanvasRect.bottom
+      event.clientX >= touchCanvasRect.left &&
+      event.clientX <= touchCanvasRect.right &&
+      event.clientY >= touchCanvasRect.top &&
+      event.clientY <= touchCanvasRect.bottom
     );
     if (!isInsideTouchZone) {
-      return false;
+      return;
     }
 
     const deadzoneTopClientY = touchCanvasRect.bottom - touchBottomDeadzonePx;
-    if (clientY >= deadzoneTopClientY) {
-      return true;
+    if (event.clientY >= deadzoneTopClientY) {
+      event.preventDefault();
+      return;
     }
 
     const frameRect = frame.getBoundingClientRect();
-    const localX = clientX - frameRect.left;
-    const localY = clientY - frameRect.top;
+    const localX = event.clientX - frameRect.left;
+    const localY = event.clientY - frameRect.top;
 
     const zoneOffsetX = touchCanvasRect.left - frameRect.left;
     const zoneOffsetY = touchCanvasRect.top - frameRect.top;
@@ -1684,50 +1640,20 @@ function PracticeModePage() {
     const arc = getTouchArcGeometry(touchCanvasRect.width, touchCanvasRect.height);
     const deadzoneTop = Math.max(0, touchCanvasRect.height - touchBottomDeadzonePx);
     if (zoneY >= deadzoneTop) {
-      return true;
+      event.preventDefault();
+      return;
     }
     const dx = zoneX - arc.centerX;
     const dy = zoneY - arc.centerY;
     const isDon = dx * dx + dy * dy <= arc.radius * arc.radius;
+
+    event.preventDefault();
+
     triggerInputFeedback(isDon ? 'don' : 'ka');
-    return true;
-  }, [getTouchArcGeometry, touchBottomDeadzonePx, triggerInputFeedback]);
-
-  const handlePracticePointerDown = useCallback((event) => {
-    const frame = event.currentTarget;
-    if (!frame) return;
-    if (isLikelyDuplicateTouchLikeInput(event.clientX, event.clientY)) {
-      event.preventDefault();
-      return;
-    }
-    const handled = handlePracticeTouchPoint(frame, event.clientX, event.clientY);
-    if (handled) {
-      event.preventDefault();
-    }
   }, [
-    isLikelyDuplicateTouchLikeInput,
-    handlePracticeTouchPoint
-  ]);
-
-  const handlePracticeTouchStart = useCallback((event) => {
-    const frame = event.currentTarget;
-    if (!frame) return;
-    const touches = Array.from(event.changedTouches || []);
-    let handledAny = false;
-    for (const touch of touches) {
-      const clientX = touch.clientX;
-      const clientY = touch.clientY;
-      if (isLikelyDuplicateTouchLikeInput(clientX, clientY)) {
-        continue;
-      }
-      handledAny = handlePracticeTouchPoint(frame, clientX, clientY) || handledAny;
-    }
-    if (handledAny) {
-      event.preventDefault();
-    }
-  }, [
-    isLikelyDuplicateTouchLikeInput,
-    handlePracticeTouchPoint
+    getTouchArcGeometry,
+    touchBottomDeadzonePx,
+    triggerInputFeedback
   ]);
 
   useEffect(() => {
@@ -3310,7 +3236,6 @@ function PracticeModePage() {
 
         <PracticeStage
           onPointerDown={handlePracticePointerDown}
-          onTouchStart={handlePracticeTouchStart}
           canvasRef={canvasRef}
           touchGuideCanvasRef={touchGuideCanvasRef}
           fileInputRef={fileInputRef}
