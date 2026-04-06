@@ -1,6 +1,6 @@
 import { getEffectiveBpm, getEffectiveScroll } from '../../TJARenderer/src/tja-parser.ts';
 import { NoteType } from '../../TJARenderer/src/primitives.ts';
-import { NOTE_SMALL_RADIUS } from './constants.js';
+import { NOTE_OUTLINE_WIDTH, NOTE_SMALL_RADIUS } from './constants.js';
 
 const JUDGE_PARTICLE_COUNT = 18;
 const JUDGEABLE_NOTE_SET = new Set([NoteType.Don, NoteType.Ka, NoteType.DonBig, NoteType.KaBig]);
@@ -267,7 +267,8 @@ export function getChartReferenceBpm(chart) {
 
 export function computeScrollPxPerMsByBpm(referenceBpm) {
   const beat16Ms = 60000 / (referenceBpm * 4);
-  const targetSpacingPx = NOTE_SMALL_RADIUS * 2;
+  const innerRingRadius = Math.max(1, NOTE_SMALL_RADIUS - NOTE_OUTLINE_WIDTH);
+  const targetSpacingPx = innerRingRadius * 2;
   const value = targetSpacingPx / beat16Ms;
   return Math.max(0.2, Math.min(2.2, value));
 }

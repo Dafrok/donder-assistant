@@ -32,6 +32,7 @@ import {
   KA_KEYS,
   LANE_TARGET_X,
   MOBILE_TOOLBAR_BREAKPOINT,
+  NOTE_OUTLINE_WIDTH,
   NOTE_SMALL_RADIUS,
   PRE_ROLL_MS,
   ROLL_COUNT_HOLD_MS,
@@ -1992,7 +1993,7 @@ function PracticeModePage() {
     const baseLaneBottom = Math.max(baseLaneTop + 120, height - progressAreaHeight);
     const baseLaneHeight = Math.max(120, baseLaneBottom - baseLaneTop);
     const judgeXBase = Math.max(60, Math.min(width - 60, LANE_TARGET_X));
-    const baseOutlineWidth = 4;
+    const baseOutlineWidth = NOTE_OUTLINE_WIDTH;
     const baseSmallRadius = NOTE_SMALL_RADIUS;
     const baseBigRadius = Math.round((baseSmallRadius * 4) / 3 + baseOutlineWidth + 1);
     const baseJudgeSmallRadius = baseSmallRadius;

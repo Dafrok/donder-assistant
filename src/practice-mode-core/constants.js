@@ -10,6 +10,7 @@ export const HIT_NOTE_HOLD_MS = 55;
 export const HIT_NOTE_FLY_MS = 320;
 export const TOUCH_GUIDE_VIBRATION_MS = 220;
 export const LANE_TARGET_X = 120;
+export const NOTE_OUTLINE_WIDTH = 4;
 export const NOTE_SMALL_RADIUS = 53;
 export const MOBILE_TOOLBAR_BREAKPOINT = 640;
 
