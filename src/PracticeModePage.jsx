@@ -462,6 +462,7 @@ function PracticeModePage() {
     touchGuidePulseRef.current = [];
     setIsPlaying(false);
     setIsPaused(false);
+    setIsResultDialogOpen(false);
     setNowMs(-PRE_ROLL_MS);
     pausedAtMsRef.current = -PRE_ROLL_MS;
     missIgnoreBeforeMsRef.current = -Infinity;
@@ -2077,6 +2078,7 @@ function PracticeModePage() {
     if (current > durationMs + BAD_WINDOW + 400) {
       setIsPlaying(false);
       setIsPaused(false);
+      setIsResultDialogOpen(true);
       setStatusText('练习结束。可以重置后再次开始。');
       stopLoop();
       stopAudioPlayback();
@@ -2093,6 +2095,7 @@ function PracticeModePage() {
     }
     stopLoop();
     stopAudioPlayback();
+    setIsResultDialogOpen(false);
     const scheduledStart = performance.now() + PRE_ROLL_MS;
     scheduledStartRef.current = scheduledStart;
     playStartRef.current = scheduledStart;
@@ -3265,30 +3268,28 @@ function PracticeModePage() {
     }
 
     for (const roll of visibleRolls) {
-      const xStart = Math.max(-80, Math.min(width + 80, roll.xStart * rowWidthScale + laneShift));
-      const xEnd = Math.max(-80, Math.min(width + 80, roll.xEnd * rowWidthScale + laneShift));
-      const left = Math.min(xStart, xEnd);
-      const right = Math.max(xStart, xEnd);
+      const xStart = Math.max(-120, Math.min(width + 120, roll.xStart * rowWidthScale + laneShift));
+      const xEnd = Math.max(-120, Math.min(width + 120, roll.xEnd * rowWidthScale + laneShift));
+      const centerLeft = Math.min(xStart, xEnd);
+      const centerRight = Math.max(xStart, xEnd);
       const barHeight = roll.isBig
         ? dynamicBigRadius * 2
         : dynamicSmallRadius * 2;
       const y = laneY - barHeight / 2;
+      const radius = barHeight / 2;
 
       ctx.fillStyle = '#f7c63a';
       ctx.strokeStyle = '#c98812';
       ctx.lineWidth = 3;
 
-      const widthPx = Math.max(10, right - left);
-      const radius = barHeight / 2;
-      const bodyWidth = Math.max(radius * 2, widthPx);
-
-      // Standard drumroll capsule: front semicircle + middle body + end semicircle.
+      // Arcade drumroll geometry: start/end timestamps map to the semicircle centers,
+      // so the visible body extends one radius beyond each center.
       ctx.beginPath();
-      ctx.moveTo(left + radius, y);
-      ctx.lineTo(left + bodyWidth - radius, y);
-      ctx.arc(left + bodyWidth - radius, y + radius, radius, -Math.PI / 2, Math.PI / 2);
-      ctx.lineTo(left + radius, y + barHeight);
-      ctx.arc(left + radius, y + radius, radius, Math.PI / 2, -Math.PI / 2);
+      ctx.moveTo(centerLeft, y);
+      ctx.lineTo(centerRight, y);
+      ctx.arc(centerRight, laneY, radius, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(centerLeft, y + barHeight);
+      ctx.arc(centerLeft, laneY, radius, Math.PI / 2, -Math.PI / 2);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
