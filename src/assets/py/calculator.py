@@ -11,6 +11,7 @@ except ImportError:
     # 兼容旧版入口名
     from 复合 import compute_final_composite_difficulty as compute_composite_difficulty
 from 节奏 import compute_final_rhythm_difficulty
+from 节奏_整体 import compute_final_rhythm_difficulty as compute_overall_rhythm_difficulty
 from 手速 import compute_weighted_average as compute_speed_weighted_average
 from 爆发 import compute_weighted_average as compute_burst_weighted_average
 
@@ -102,9 +103,31 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
     total_notes = count_total_notes(unbranched, note_types)
     
     if len(intervals) == 0:
-        return {'stamina': 0, 'complex': 0, 'complexRatio': 0, 'rhythm': 0, 'rhythmRatio': 0, 'speed': 0, 'burst': 0, 'totalNotes': total_notes}
+        return {
+            'stamina': 0,
+            'complex': 0,
+            'complexRatio': 0,
+            'rhythm': 0,
+            'rhythmRatio': 0,
+            'rhythmOverall': 0,
+            'rhythmRatioOverall': 0,
+            'speed': 0,
+            'burst': 0,
+            'totalNotes': total_notes
+        }
     
-    results = {'stamina': 0, 'complex': 0, 'complexRatio': 0, 'rhythm': 0, 'rhythmRatio': 0, 'speed': 0, 'burst': 0, 'totalNotes': total_notes}
+    results = {
+        'stamina': 0,
+        'complex': 0,
+        'complexRatio': 0,
+        'rhythm': 0,
+        'rhythmRatio': 0,
+        'rhythmOverall': 0,
+        'rhythmRatioOverall': 0,
+        'speed': 0,
+        'burst': 0,
+        'totalNotes': total_notes
+    }
     
     # 计算体力定数
     try:
@@ -135,6 +158,12 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
     # 计算节奏定数（返回 总难度, 难占比）
     try:
         results['rhythm'], results['rhythmRatio'] = compute_final_rhythm_difficulty(intervals)
+    except Exception:
+        pass
+
+    # 计算节奏定数（整体算法，返回 总难度, 难占比）
+    try:
+        results['rhythmOverall'], results['rhythmRatioOverall'] = compute_overall_rhythm_difficulty(intervals)
     except Exception:
         pass
     
