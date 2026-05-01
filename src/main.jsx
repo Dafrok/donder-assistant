@@ -38,6 +38,7 @@ import {
   ArrowUploadRegular,
   Calculator20Regular,
   CalculatorRegular,
+  CloudArrowUpRegular,
   DataLine20Regular,
   DataHistogram20Regular,
   DataHistogramRegular,
@@ -703,6 +704,7 @@ function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const uploadAllInputRef = useRef(null);
   const headerRef = useRef(null);
   const footerRef = useRef(null);
   const filterPanelRef = useRef(null);
@@ -751,6 +753,7 @@ function App() {
     if (!Array.isArray(ids)) return new Set();
     return new Set(ids.filter((id) => typeof id === 'string' && id));
   });
+  const [uploadAllDialogOpen, setUploadAllDialogOpen] = useState(false);
 
   const routeSearchKeyword = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -1729,6 +1732,139 @@ function App() {
     }
   }
 
+  async function handleUploadAllCharts(fileEntries) {
+    showLoading('正在获取谱面映射...');
+
+    let mappingResponse;
+    let idToPath = {};
+    try {
+      mappingResponse = await fetch('https://cdn.ourtaiko.org/api/ese_mapping');
+      if (!mappingResponse.ok) {
+        throw new Error(`获取谱面映射失败: ${mappingResponse.status}`);
+      }
+      const mappingData = await mappingResponse.json();
+      // mappingData is an object: { "id": "relative/path/file.tja", ... }
+      for (const [id, relativePath] of Object.entries(mappingData)) {
+        if (id && relativePath && typeof relativePath === 'string') {
+          idToPath[id] = relativePath;
+        }
+      }
+      showLoading(`已获取 ${Object.keys(idToPath).length} 个谱面映射，准备分析...`);
+    } catch (error) {
+      hideLoading();
+      showErrorModal(`获取谱面映射失败: ${error.message}`, '网络请求失败');
+      return;
+    }
+
+    // Build a map from relative path to file content
+    const pathToContent = {};
+    const errors = [];
+    const BATCH = 30;
+
+    for (let i = 0; i < fileEntries.length; i += 1) {
+      if (i % BATCH === 0) {
+        showLoading(`正在读取文件... (${i}/${fileEntries.length})`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const { file, relativePath } = fileEntries[i];
+      try {
+        if (!isSupportedChartFile(file.name)) continue;
+        const text = await readFileAsText(file);
+        pathToContent[relativePath.replace(/\\/g, '/')] = text;
+      } catch (err) {
+        errors.push(`${relativePath}: ${err.message}`);
+      }
+    }
+
+    showLoading('正在分析谱面并计算定数...');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const results = {};
+    const ids = Object.keys(idToPath);
+    const allIds = ids.length;
+
+    for (let i = 0; i < allIds; i += 1) {
+      if (i % BATCH === 0) {
+        showLoading(`正在分析谱面... (${i}/${allIds})`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const id = ids[i];
+      const relativePath = idToPath[id];
+
+      // Find the matching content
+      let matchedContent = null;
+      for (const [path, content] of Object.entries(pathToContent)) {
+        // Normalize both paths for comparison
+        const normalizedPath = path.toLowerCase();
+        const normalizedRelPath = relativePath.toLowerCase().replace(/\\/g, '/');
+        if (normalizedPath.endsWith(normalizedRelPath) || normalizedPath.includes(normalizedRelPath)) {
+          matchedContent = content;
+          break;
+        }
+      }
+
+      if (!matchedContent) {
+        results[id] = { error: 'tja file not found' };
+        continue;
+      }
+
+      try {
+        const data = analyzeTjaToJson(matchedContent);
+        // Calculate constants using the existing Python calculation
+        const songsWithData = [{ category: 'upload', songName: id, data, songHash: id, tjaContent: matchedContent }];
+        const calcResults = await calculateDifficulty(songsWithData, null, null);
+
+        // Extract ratings for each chart
+        if (calcResults && calcResults.length > 0 && calcResults[0].charts && calcResults[0].charts.length > 0) {
+          const ratingsMap = {};
+          for (const chart of calcResults[0].charts) {
+            ratingsMap[`${chart.difficulty}_${chart.branchType}`] = chart.ratings;
+          }
+          results[id] = ratingsMap;
+        } else {
+          results[id] = { error: 'no charts found' };
+        }
+      } catch (err) {
+        results[id] = { error: err.message };
+      }
+    }
+
+    showLoading('正在导出 JSON...');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Export results as JSON
+    const jsonBlob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(jsonBlob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `constants_export_${new Date().toISOString().slice(0, 10)}.json`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    hideLoading();
+    if (errors.length) {
+      showErrorModal(`部分文件读取失败:\n${errors.slice(0, 8).join('\n')}`, '部分文件读取失败');
+    }
+  }
+
+  async function onUploadAllInputChange(event) {
+    try {
+      const fileEntries = normalizeFileList(event.target.files);
+      await handleUploadAllCharts(fileEntries);
+    } catch (error) {
+      hideLoading();
+      console.log(error)
+      showErrorModal(error.message || '上传失败，请检查文件格式。', '导入失败');
+    } finally {
+      event.target.value = '';
+    }
+  }
+
   async function onDrop(event) {
     event.preventDefault();
     setDragOver(false);
@@ -1974,6 +2110,16 @@ function App() {
               >
                 导出结果
               </ToolbarButton>
+              <ToolbarButton
+                className="list-toolbar-button"
+                appearance="subtle"
+                icon={<CloudArrowUpRegular />}
+                aria-label="上传所有谱面"
+                title="上传所有谱面"
+                onClick={() => uploadAllInputRef.current?.click()}
+              >
+                上传所有谱面
+              </ToolbarButton>
             </Toolbar>
             {!allResults.length ? (
               <div className="drop-placeholder" role="button" tabIndex={0} onClick={() => fileInputRef.current?.click()}>
@@ -2125,6 +2271,7 @@ function App() {
         ) : null}
 
         <input ref={fileInputRef} type="file" multiple className="hidden-input" onChange={onUploadInputChange} />
+        <input ref={uploadAllInputRef} type="file" multiple className="hidden-input" onChange={onUploadAllInputChange} webkitdirectory="" directory="" />
 
         <Dialog open={errorDialog.open} onOpenChange={(_, data) => !data.open && hideErrorModal()}>
           <DialogSurface>
