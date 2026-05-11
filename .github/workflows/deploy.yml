@@ -25,8 +25,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      - name: Build for GitHub Pages
+        run: APP_BASE_URL=/donder-assistant/ npm run build
 
       - name: Add SPA fallback page
         run: cp dist/index.html dist/404.html
@@ -36,3 +36,16 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
+
+      - name: Build for Netlify branch
+        run: APP_BASE_URL=/ npm run build
+
+      - name: Add SPA fallback page for Netlify branch
+        run: cp dist/index.html dist/404.html
+
+      - name: Deploy to netlify-app
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: netlify-app

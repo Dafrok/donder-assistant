@@ -16,11 +16,12 @@ try {
 
 // 获取构建时间
 const buildTime = new Date().toISOString();
+const baseUrl = process.env.APP_BASE_URL || (process.env.GITHUB_ACTIONS ? '/donder-assistant/' : '/');
 
 export default defineConfig({
   root: 'src',
   publicDir: '../public',
-  base: process.env.GITHUB_ACTIONS ? '/donder-assistant/' : '/',
+  base: baseUrl,
   plugins: [react()],
   resolve: {
     alias: {}
