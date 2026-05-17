@@ -53,6 +53,42 @@ function formatGapThreshold(value) {
   return Number(value).toFixed(1);
 }
 
+function formatRollOutputValue(value) {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : Number(value).toFixed(2);
+  }
+  return String(value);
+}
+
+function normalizeRollOutputBars(output) {
+  const normalizeValue = (value) => ({
+    text: formatRollOutputValue(value),
+    className: value === null || value === undefined ? 'gap-null' : 'gap-normal'
+  });
+
+  if (Array.isArray(output)) {
+    if (output.length === 0) return [];
+
+    if (output.every((item) => Array.isArray(item))) {
+      return output.map((row, index) => ({
+        label: `${index + 1}`,
+        values: (row.length ? row : [null]).map((value) => normalizeValue(value))
+      }));
+    }
+
+    return [{
+      label: '1',
+      values: output.map((value) => normalizeValue(value))
+    }];
+  }
+
+  return [{
+    label: '1',
+    values: [normalizeValue(output)]
+  }];
+}
+
 function pickCourseSpecifier(chartInfo, difficulty) {
   const specifiers = chartInfo?.courseSpecifiers || [];
   if (!specifiers.length) return undefined;
@@ -182,6 +218,23 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
   const fastMax = formatGapThreshold(gapProfile?.fastMax);
   const mediumMax = formatGapThreshold(gapProfile?.mediumMax);
   const normalMax = formatGapThreshold(gapProfile?.normalMax);
+  const rollEquivalentOutputs = Array.isArray(detail?.ratings?.rollEquivalentOutputs)
+    ? detail.ratings.rollEquivalentOutputs
+    : [];
+  const rollEquivalentOutputItems = [
+    {
+      label: '滚奏等效音符间距',
+      bars: normalizeRollOutputBars(rollEquivalentOutputs[0])
+    },
+    {
+      label: '滚奏等效音符',
+      bars: normalizeRollOutputBars(rollEquivalentOutputs[1])
+    },
+    {
+      label: '滚奏等效系数',
+      bars: normalizeRollOutputBars(rollEquivalentOutputs[2])
+    }
+  ];
 
   useEffect(() => {
     overlayScaleRef.current = overlayScale;
@@ -937,6 +990,36 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
                   <Body1 className="hint">该谱面暂无可展示的小节间隔数据。</Body1>
                 )}
               </section>
+
+              {rollEquivalentOutputItems.map((item) => (
+                <section className="chart-detail-card chart-detail-gaps-card" aria-label={item.label} key={item.label}>
+                  <h3 className="chart-detail-card-title">{item.label}</h3>
+                  {item.bars.length ? (
+                    <div className="chart-gap-list gap-list">
+                      {item.bars.map((bar) => (
+                        <div className="gap-bar" key={`${item.label}-${bar.label}`}>
+                          <span className="gap-bar-label">{bar.label}</span>
+                          <div className="gap-bar-values">
+                            {bar.values.length ? (
+                              bar.values.map((value, idx) => (
+                                <span className={`gap-value ${value.className}`} key={`${item.label}-${bar.label}-${idx}`}>
+                                  {value.text}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="gap-null gap-value" key={`${item.label}-${bar.label}-placeholder`}>
+                                -
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <Body1 className="hint">暂无滚奏等效输出数据。</Body1>
+                  )}
+                </section>
+              ))}
             </div>
           </div>
         ) : (
