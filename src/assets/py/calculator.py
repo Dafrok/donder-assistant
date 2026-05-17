@@ -11,8 +11,10 @@ except ImportError:
     # 兼容旧版入口名
     from 复合 import compute_final_composite_difficulty as compute_composite_difficulty
 from 节奏 import compute_final_rhythm_difficulty
+from 节奏_整体 import compute_final_rhythm_difficulty as compute_overall_rhythm_difficulty
 from 手速 import compute_weighted_average as compute_speed_weighted_average
-from 滚奏等效 import compute_roll_equivalent_difficulty
+from 手速_95线 import compute_weighted_average as compute_speed95_weighted_average
+from 滚奏等效 import process as compute_roll_process
 from 爆发 import compute_weighted_average as compute_burst_weighted_average
 
 
@@ -54,6 +56,34 @@ def generate_bn_array(length):
     for i in range(length):
         bn.append(1 if i % 2 == 0 else 2)
     return bn
+
+
+def compute_roll_equivalent_value(intervals, note_types=None):
+    """计算滚奏等效值（取 process 输出中的最大 C）"""
+    if not intervals or len(intervals) == 0:
+        return 0
+
+    an = intervals.copy()
+
+    if note_types and isinstance(note_types, list):
+        bn = []
+        for v in note_types:
+            if v in (1, 3):
+                bn.append(1)
+            elif v in (2, 4):
+                bn.append(2)
+        if len(bn) < len(intervals) + 1:
+            bn.extend(generate_bn_array(len(intervals) + 1 - len(bn)))
+        elif len(bn) > len(intervals) + 1:
+            bn = bn[:len(intervals) + 1]
+    else:
+        bn = generate_bn_array(len(intervals) + 1)
+
+    results = compute_roll_process(an, bn)
+    if not results:
+        return 0
+
+    return max((item[2] for item in results), default=0)
 
 
 def get_note_types_for_chart(song_data, difficulty_name, branch_type):
@@ -109,7 +139,10 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
             'complexRatio': 0,
             'rhythm': 0,
             'rhythmRatio': 0,
+            'rhythmOverall': 0,
+            'rhythmRatioOverall': 0,
             'speed': 0,
+            'speed95': 0,
             'rollEquivalent': 0,
             'burst': 0,
             'totalNotes': total_notes
@@ -121,7 +154,10 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
         'complexRatio': 0,
         'rhythm': 0,
         'rhythmRatio': 0,
+        'rhythmOverall': 0,
+        'rhythmRatioOverall': 0,
         'speed': 0,
+        'speed95': 0,
         'rollEquivalent': 0,
         'burst': 0,
         'totalNotes': total_notes
@@ -158,6 +194,12 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
         results['rhythm'], results['rhythmRatio'] = compute_final_rhythm_difficulty(intervals)
     except Exception:
         pass
+
+    # 计算节奏定数（整体算法，返回 总难度, 难占比）
+    try:
+        results['rhythmOverall'], results['rhythmRatioOverall'] = compute_overall_rhythm_difficulty(intervals)
+    except Exception:
+        pass
     
     # 计算手速定数（手速算法）
     try:
@@ -165,9 +207,15 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
     except Exception:
         pass
 
-    # 计算滚奏等效定数（返回 总难度, 难占比）
+    # 计算手速定数（95线算法）
     try:
-        results['rollEquivalent'], _ = compute_roll_equivalent_difficulty(intervals)
+        results['speed95'] = compute_speed95_weighted_average(intervals)
+    except Exception:
+        pass
+
+    # 计算滚奏等效值（取滚奏等效算法输出中的最大 C）
+    try:
+        results['rollEquivalent'] = compute_roll_equivalent_value(intervals, note_types)
     except Exception:
         pass
 
