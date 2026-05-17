@@ -118,3 +118,46 @@ def process(an, bn):
         results.append((an_new.copy(), bn_new.copy(), Ck))
     
     return results
+
+
+def compute_roll_equivalent_difficulty(intervals):
+    """
+    计算滚奏等效难度
+    
+    参数:
+    intervals: 音符间隔数组
+    
+    返回:
+    (总难度, 难占比) 元组
+    """
+    if not intervals or len(intervals) == 0:
+        return (0, 0)
+    
+    # 构造an和bn数组
+    an = intervals.copy()
+    bn = []
+    for i in range(len(intervals) + 1):
+        bn.append(1 if i % 2 == 0 else 2)
+    
+    try:
+        # 调用process函数获取简化结果
+        results = process(an, bn)
+        
+        if not results:
+            return (0, 0)
+        
+        # 计算所有简化结果中的最大难度
+        max_difficulty = 0
+        for an_simplified, bn_simplified, coefficient in results:
+            if an_simplified:
+                # 根据系数和简化后的数据计算难度
+                avg_interval = sum(an_simplified) / len(an_simplified) if an_simplified else 0
+                difficulty = avg_interval * coefficient if avg_interval > 0 else 0
+                max_difficulty = max(max_difficulty, difficulty)
+        
+        # 难占比为简化处理的最高系数
+        ratio = max(r[2] for r in results) if results else 0
+        
+        return (max_difficulty, ratio)
+    except Exception:
+        return (0, 0)
