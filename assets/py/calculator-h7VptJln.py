@@ -11,9 +11,8 @@ except ImportError:
     # 兼容旧版入口名
     from 复合 import compute_final_composite_difficulty as compute_composite_difficulty
 from 节奏 import compute_final_rhythm_difficulty
-from 节奏_整体 import compute_final_rhythm_difficulty as compute_overall_rhythm_difficulty
 from 手速 import compute_weighted_average as compute_speed_weighted_average
-from 手速_95线 import compute_weighted_average as compute_speed95_weighted_average
+from 滚奏等效 import compute_roll_equivalent_difficulty
 from 爆发 import compute_weighted_average as compute_burst_weighted_average
 
 
@@ -110,10 +109,8 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
             'complexRatio': 0,
             'rhythm': 0,
             'rhythmRatio': 0,
-            'rhythmOverall': 0,
-            'rhythmRatioOverall': 0,
             'speed': 0,
-            'speed95': 0,
+            'rollEquivalent': 0,
             'burst': 0,
             'totalNotes': total_notes
         }
@@ -124,10 +121,8 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
         'complexRatio': 0,
         'rhythm': 0,
         'rhythmRatio': 0,
-        'rhythmOverall': 0,
-        'rhythmRatioOverall': 0,
         'speed': 0,
-        'speed95': 0,
+        'rollEquivalent': 0,
         'burst': 0,
         'totalNotes': total_notes
     }
@@ -163,12 +158,6 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
         results['rhythm'], results['rhythmRatio'] = compute_final_rhythm_difficulty(intervals)
     except Exception:
         pass
-
-    # 计算节奏定数（整体算法，返回 总难度, 难占比）
-    try:
-        results['rhythmOverall'], results['rhythmRatioOverall'] = compute_overall_rhythm_difficulty(intervals)
-    except Exception:
-        pass
     
     # 计算手速定数（手速算法）
     try:
@@ -176,9 +165,9 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
     except Exception:
         pass
 
-    # 计算手速定数（95线算法）
+    # 计算滚奏等效定数（返回 总难度, 难占比）
     try:
-        results['speed95'] = compute_speed95_weighted_average(intervals)
+        results['rollEquivalent'], _ = compute_roll_equivalent_difficulty(intervals)
     except Exception:
         pass
 
