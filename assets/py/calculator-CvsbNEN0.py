@@ -58,13 +58,8 @@ def generate_bn_array(length):
     return bn
 
 
-def compute_roll_equivalent_value(intervals, note_types=None):
-    """计算滚奏等效值（取 process 输出中的最大 C）"""
-    if not intervals or len(intervals) == 0:
-        return 0
-
-    an = intervals.copy()
-
+def build_roll_bn(intervals, note_types=None):
+    """为滚奏等效算法构造 bn 数组"""
     if note_types and isinstance(note_types, list):
         bn = []
         for v in note_types:
@@ -76,14 +71,42 @@ def compute_roll_equivalent_value(intervals, note_types=None):
             bn.extend(generate_bn_array(len(intervals) + 1 - len(bn)))
         elif len(bn) > len(intervals) + 1:
             bn = bn[:len(intervals) + 1]
-    else:
-        bn = generate_bn_array(len(intervals) + 1)
+        return bn
+
+    return generate_bn_array(len(intervals) + 1)
+
+
+def compute_roll_equivalent(intervals, note_types=None):
+    """计算滚奏等效值，并返回算法前三个输出（C1/C2/C3）"""
+    if not intervals or len(intervals) == 0:
+        return 0, [[], [], 0]
+
+    an = intervals.copy()
+    bn = build_roll_bn(intervals, note_types)
 
     results = compute_roll_process(an, bn)
     if not results:
-        return 0
+        return 0, [[], [], 0]
 
-    return max((item[2] for item in results), default=0)
+    candidates = []
+
+    if isinstance(results, tuple) and len(results) == 3:
+        candidates = [results]
+    elif isinstance(results, list):
+        for item in results:
+            if (isinstance(item, tuple) or isinstance(item, list)) and len(item) == 3:
+                candidates.append(item)
+
+    if not candidates:
+        return 0, [[], [], 0]
+
+    max_c = max((item[2] for item in candidates), default=0)
+    primary = candidates[0]
+    output_c1 = primary[0] if isinstance(primary[0], list) else []
+    output_c2 = primary[1] if isinstance(primary[1], list) else []
+    output_c3 = primary[2] if isinstance(primary[2], (int, float)) else 0
+
+    return max_c, [output_c1, output_c2, output_c3]
 
 
 def get_note_types_for_chart(song_data, difficulty_name, branch_type):
@@ -144,6 +167,7 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
             'speed': 0,
             'speed95': 0,
             'rollEquivalent': 0,
+            'rollEquivalentOutputs': [[], [], 0],
             'burst': 0,
             'totalNotes': total_notes
         }
@@ -159,6 +183,7 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
         'speed': 0,
         'speed95': 0,
         'rollEquivalent': 0,
+        'rollEquivalentOutputs': [[], [], 0],
         'burst': 0,
         'totalNotes': total_notes
     }
@@ -215,7 +240,9 @@ def calculate_difficulty_ratings(unbranched, note_types=None):
 
     # 计算滚奏等效值（取滚奏等效算法输出中的最大 C）
     try:
-        results['rollEquivalent'] = compute_roll_equivalent_value(intervals, note_types)
+        roll_value, roll_outputs = compute_roll_equivalent(intervals, note_types)
+        results['rollEquivalent'] = roll_value
+        results['rollEquivalentOutputs'] = roll_outputs
     except Exception:
         pass
 
