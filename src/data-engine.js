@@ -25,7 +25,7 @@ function yieldToMain() {
 }
 
 /**
- * 初始化 Pyodide - 从 CDN 加载
+ * 初始化 Pyodide - 从站点 base 路径加载
  */
 export async function initPyodide() {
   if (pyodideReady && pyodide) return pyodide;
@@ -36,9 +36,10 @@ export async function initPyodide() {
       console.log('🐍 初始化 Pyodide...');
 
       await yieldToMain();
-      const { loadPyodide } = await import('https://dafrok.github.io/donder-assistant/pyodide/pyodide.mjs');
+      const pyodideBase = `${import.meta.env.BASE_URL}pyodide/`;
+      const { loadPyodide } = await import(`${pyodideBase}pyodide.mjs`);
       await yieldToMain();
-      pyodide = await loadPyodide({ indexURL: 'https://dafrok.github.io/donder-assistant/pyodide/' });
+      pyodide = await loadPyodide({ indexURL: pyodideBase });
 
       console.log('✅ Pyodide 初始化完成');
       pyodideReady = true;
