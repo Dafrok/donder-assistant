@@ -1,3 +1,8 @@
+/**
+ * 定数表页面
+ * 显示难度定数和各维度属性的表格
+ */
+
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { flushSync } from 'react-dom';
 import {
@@ -8,6 +13,14 @@ import {
   Body1,
   Spinner
 } from '@fluentui/react-components';
+import VirtualTable from '../../components/VirtualTable/index.jsx';
+import {
+  getCategoryBadgeClass,
+  getBranchTextClass,
+  getDifficultyTextClass,
+  getNumericValue,
+  getConstantValueToneClass
+} from './column-renderer.js';
 
 let constantsCache = null;
 const ROW_HEIGHT = 44;
@@ -32,181 +45,6 @@ function estimateTextPixelWidth(text, font) {
   }
 
   return normalized.length * 8;
-}
-
-function getCategoryBadgeClass(category) {
-  const normalized = String(category || '').trim().toLowerCase();
-  if (!normalized) return '';
-
-  if (normalized.includes('children') || normalized.includes('folk')) {
-    return 'badge-children-folk';
-  }
-  if (normalized.includes('namco') || normalized.includes('original')) {
-    return 'badge-namco-original';
-  }
-  if (normalized.includes('game')) {
-    return 'badge-game-music';
-  }
-  if (normalized.includes('vocaloid')) {
-    return 'badge-vocaloid';
-  }
-  if (normalized.includes('anime')) {
-    return 'badge-anime';
-  }
-  if (normalized.includes('classical')) {
-    return 'badge-classical';
-  }
-  if (normalized.includes('variety') || normalized.includes('variaty')) {
-    return 'badge-variety';
-  }
-  if (normalized.includes('pop')) {
-    return 'badge-pop';
-  }
-
-  return '';
-}
-
-function getBranchTextClass(branch) {
-  const normalized = String(branch || '').trim().toLowerCase();
-  if (!normalized) return '';
-
-  if (normalized.includes('master') || normalized.includes('达人')) {
-    return 'constants-branch-master';
-  }
-  if (normalized.includes('expert') || normalized.includes('玄人')) {
-    return 'constants-branch-expert';
-  }
-  if (normalized.includes('normal') || normalized.includes('普通')) {
-    return 'constants-branch-normal';
-  }
-
-  return '';
-}
-
-function getDifficultyTextClass(difficulty) {
-  const normalized = String(difficulty || '').trim().toLowerCase();
-  if (!normalized) return '';
-
-  if (normalized.includes('edit') || normalized.includes('里')) {
-    return 'constants-difficulty-edit';
-  }
-  if (normalized.includes('oni') || normalized.includes('魔王')) {
-    return 'constants-difficulty-oni';
-  }
-  if (normalized.includes('hard') || normalized.includes('困难')) {
-    return 'constants-difficulty-hard';
-  }
-  if (normalized.includes('normal') || normalized.includes('普通')) {
-    return 'constants-difficulty-normal';
-  }
-  if (normalized.includes('easy') || normalized.includes('简单')) {
-    return 'constants-difficulty-easy';
-  }
-
-  return '';
-}
-
-function getConstantValueToneClass(value) {
-  const numericValue = getNumericValue(value);
-  if (numericValue === null) return '';
-  if (numericValue <= 0) return 'constants-value-zero';
-  if (numericValue >= 15) return 'constants-value-extreme';
-
-  const step = Math.max(1, Math.min(15, Math.ceil(numericValue)));
-  return `constants-value-step-${step}`;
-}
-
-const ConstantsVirtualList = memo(function ConstantsVirtualList({
-  headers,
-  visibleRows,
-  topSpacerHeight,
-  bottomSpacerHeight,
-  columnStyles,
-  constantColumnIndexes,
-  categoryColumnIndex,
-  difficultyColumnIndex,
-  branchColumnIndex,
-  handleSort,
-  renderSortIcon,
-  openDetail
-}) {
-  return (
-    <div className="constants-virtual-grid table-grid" role="table" aria-label="定数表">
-      <div className="constants-virtual-header" role="rowgroup">
-        <div className="constants-virtual-header-row" role="row">
-          {headers.map((header, columnIndex) => (
-            <div
-              key={header.key}
-              role="columnheader"
-              aria-colindex={columnIndex + 1}
-              onClick={() => handleSort(columnIndex)}
-              className={`${columnIndex === 0 ? 'sticky-first-col-header' : ''} sortable constants-virtual-cell constants-virtual-header-cell`.trim()}
-              style={columnStyles[columnIndex]}
-            >
-              <span className="header-cell-text">
-                <span className="header-title-text">{header.label}</span>
-                <span className="sort-indicator">{renderSortIcon(columnIndex)}</span>
-              </span>
-            </div>
-          ))}
-          <div className="constants-virtual-row-spacer constants-virtual-header-spacer" aria-hidden="true" />
-        </div>
-      </div>
-      {visibleRows.length === 0 && topSpacerHeight === 0 && bottomSpacerHeight === 0 ? (
-        <div className="constants-virtual-scroll-root" aria-label="空列表">
-          <div className="constants-loading-wrap">
-            <Body1>没有匹配的数据</Body1>
-          </div>
-        </div>
-      ) : (
-        <div className="constants-virtual-scroll-root" aria-label="定数列表">
-          {topSpacerHeight > 0 ? <div className="constants-virtual-spacer" style={{ height: `${topSpacerHeight}px` }} aria-hidden="true" /> : null}
-          {visibleRows.map((item) => (
-            <div key={item.id} className="constants-row constants-virtual-row" role="row" onClick={() => openDetail(item)}>
-              {headers.map((header, columnIndex) => (
-                <div
-                  key={`${item.id}-${header.key}`}
-                  role="gridcell"
-                  aria-colindex={columnIndex + 1}
-                  className={`${columnIndex === 0 ? 'sticky-first-col-cell' : ''} constants-virtual-cell`.trim()}
-                  style={columnStyles[columnIndex]}
-                >
-                  {columnIndex === categoryColumnIndex ? (
-                    <span className={`constants-category-badge ${getCategoryBadgeClass(item.cells[columnIndex])}`.trim()}>
-                      {item.cells[columnIndex] || '-'}
-                    </span>
-                  ) : columnIndex === difficultyColumnIndex ? (
-                    <span className={`constants-cell-text constants-difficulty-text ${getDifficultyTextClass(item.cells[columnIndex])}`.trim()}>
-                      {item.cells[columnIndex] || '-'}
-                    </span>
-                  ) : columnIndex === branchColumnIndex ? (
-                    <span className={`constants-branch-text ${getBranchTextClass(item.cells[columnIndex])}`.trim()}>
-                      {item.cells[columnIndex] || '-'}
-                    </span>
-                  ) : constantColumnIndexes.has(columnIndex) ? (
-                    <span className={`constants-cell-text constants-value-text ${getConstantValueToneClass(item.cells[columnIndex])}`.trim()}>
-                      {item.cells[columnIndex] || '-'}
-                    </span>
-                  ) : (
-                    <span className="constants-cell-text">{item.cells[columnIndex] || '-'}</span>
-                  )}
-                </div>
-              ))}
-              <div className="constants-virtual-row-spacer constants-virtual-body-spacer" aria-hidden="true" />
-            </div>
-          ))}
-          {bottomSpacerHeight > 0 ? <div className="constants-virtual-spacer" style={{ height: `${bottomSpacerHeight}px` }} aria-hidden="true" /> : null}
-        </div>
-      )}
-    </div>
-  );
-});
-
-function getNumericValue(text) {
-  const normalized = String(text || '').trim().replace(/%$/, '');
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function isLikelyNumericColumn(rows, columnIndex) {
@@ -656,7 +494,6 @@ function ConstantsTablePage({ searchKeyword = '', enableLocalZoom = false, onCou
         if (measuredWidth > computedWidth) {
           computedWidth = measuredWidth;
         }
-
       }
 
       const scaledWidth = Math.max(1, Math.ceil(computedWidth * effectiveListScale));
@@ -733,6 +570,79 @@ function ConstantsTablePage({ searchKeyword = '', enableLocalZoom = false, onCou
     });
   }, [headers, onOpenDetail]);
 
+  const columns = useMemo(() => {
+    return headers.map((header, columnIndex) => ({
+      id: `col-${columnIndex}`,
+      label: header.label,
+      columnIndex,
+      sortable: true,
+      className: columnIndex === 0 ? 'sticky-first-col-cell' : '',
+      headerClassName: columnIndex === 0 ? 'sticky-first-col-header' : '',
+      style: columnStyles[columnIndex],
+      renderCell: (row) => {
+        const cellContent = row.cells[columnIndex] || '-';
+
+        if (columnIndex === categoryColumnIndex) {
+          return (
+            <span className={`constants-category-badge ${getCategoryBadgeClass(cellContent)}`.trim()}>
+              {cellContent}
+            </span>
+          );
+        }
+
+        if (columnIndex === difficultyColumnIndex) {
+          return (
+            <span className={`constants-cell-text constants-difficulty-text ${getDifficultyTextClass(cellContent)}`.trim()}>
+              {cellContent}
+            </span>
+          );
+        }
+
+        if (columnIndex === branchColumnIndex) {
+          return (
+            <span className={`constants-branch-text ${getBranchTextClass(cellContent)}`.trim()}>
+              {cellContent}
+            </span>
+          );
+        }
+
+        if (constantColumnIndexes.has(columnIndex)) {
+          return (
+            <span className={`constants-cell-text constants-value-text ${getConstantValueToneClass(cellContent)}`.trim()}>
+              {cellContent}
+            </span>
+          );
+        }
+
+        return <span className="constants-cell-text">{cellContent}</span>;
+      }
+    }));
+  }, [headers, columnStyles, categoryColumnIndex, difficultyColumnIndex, branchColumnIndex, constantColumnIndexes]);
+
+  const renderTableWrapper = (tableContent) => (
+    <div
+      className={`constants-table-wrapper table-wrapper${enableLocalZoom ? ' list-local-zoom-enabled' : ''}`}
+      ref={tableWrapperRef}
+      onScroll={handleTableWrapperScroll}
+      onWheelCapture={handleZoomWheelCapture}
+    >
+      <div
+        className="list-local-zoom-surface"
+        style={enableLocalZoom ? {
+          '--list-local-zoom-scale': listZoomScale,
+          '--constants-row-height': `${rowHeight}px`
+        } : undefined}
+      >
+        {tableContent}
+      </div>
+      {!loadingState.loading && !loadingState.error && (isPending || isListBusy) ? (
+        <div className="constants-list-busy-overlay" aria-live="polite" aria-label="列表更新中">
+          <Spinner size="medium" label="更新列表中..." />
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <section className="constants-panel" aria-label="定数表页面">
       <header className="list-caption" aria-label="定数表页面头部">
@@ -745,58 +655,45 @@ function ConstantsTablePage({ searchKeyword = '', enableLocalZoom = false, onCou
             <BreadcrumbButton current aria-current="page">定数表</BreadcrumbButton>
           </BreadcrumbItem>
         </Breadcrumb>
-
       </header>
 
-      <div
-        className={`constants-table-wrapper table-wrapper${enableLocalZoom ? ' list-local-zoom-enabled' : ''}`}
-        ref={tableWrapperRef}
-        onScroll={handleTableWrapperScroll}
-        onWheelCapture={handleZoomWheelCapture}
-      >
-        <div
-          className="list-local-zoom-surface"
-          style={enableLocalZoom ? {
-            '--list-local-zoom-scale': listZoomScale,
-            '--constants-row-height': `${rowHeight}px`
-          } : undefined}
-        >
-          {loadingState.loading ? (
-            <div className="constants-loading-wrap">
-              <Spinner size="large" label="正在解析定数表..." />
-            </div>
-          ) : null}
-          {loadingState.error ? (
-            <div className="constants-loading-wrap">
-              <Body1>{loadingState.error}</Body1>
-            </div>
-          ) : null}
-          {!loadingState.loading && !loadingState.error ? (
-            <>
-              <ConstantsVirtualList
-                key={`constants-vlist-${listZoomRevision}`}
-                headers={headers}
-                visibleRows={virtualRows.visibleRows}
-                topSpacerHeight={virtualRows.topSpacerHeight}
-                bottomSpacerHeight={virtualRows.bottomSpacerHeight}
-                columnStyles={columnStyles}
-                constantColumnIndexes={constantColumnIndexes}
-                categoryColumnIndex={categoryColumnIndex}
-                difficultyColumnIndex={difficultyColumnIndex}
-                branchColumnIndex={branchColumnIndex}
-                handleSort={handleSort}
-                renderSortIcon={renderSortIcon}
-                openDetail={openDetail}
-              />
-            </>
-          ) : null}
-        </div>
-        {!loadingState.loading && !loadingState.error && (isPending || isListBusy) ? (
-          <div className="constants-list-busy-overlay" aria-live="polite" aria-label="列表更新中">
-            <Spinner size="medium" label="更新列表中..." />
+      {loadingState.loading ? (
+        <div className="constants-table-wrapper table-wrapper">
+          <div className="constants-loading-wrap">
+            <Spinner size="large" label="正在解析定数表..." />
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : loadingState.error ? (
+        <div className="constants-table-wrapper table-wrapper">
+          <div className="constants-loading-wrap">
+            <Body1>{loadingState.error}</Body1>
+          </div>
+        </div>
+      ) : !headers.length ? (
+        <div className="constants-table-wrapper table-wrapper">
+          <div className="constants-loading-wrap">
+            <Body1>没有数据</Body1>
+          </div>
+        </div>
+      ) : (
+        <VirtualTable
+          key={`constants-vlist-${listZoomRevision}`}
+          columns={columns}
+          rows={filteredRows}
+          virtualRows={virtualRows}
+          onSort={handleSort}
+          renderSortIndicator={renderSortIcon}
+          renderCell={(row, column) => column.renderCell(row)}
+          onRowClick={openDetail}
+          gridClassName="constants-virtual-grid table-grid"
+          headerClassName="constants-virtual"
+          cellClassName="constants-virtual"
+          rowClassName="constants-virtual"
+          gridRole="table"
+          gridLabel="定数表"
+          renderWrapper={renderTableWrapper}
+        />
+      )}
     </section>
   );
 }

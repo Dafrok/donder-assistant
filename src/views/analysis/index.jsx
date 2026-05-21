@@ -6,6 +6,7 @@
 import React from 'react';
 import { Breadcrumb, BreadcrumbButton, BreadcrumbDivider, BreadcrumbItem, Body1, Toolbar, ToolbarButton } from '@fluentui/react-components';
 import { ArrowDownloadRegular, ArrowUploadRegular, CloudArrowUpRegular, StarRegular } from '@fluentui/react-icons';
+import VirtualTable from '../../components/VirtualTable/index.jsx';
 
 export function AnalysisPage({
   onUploadCharts,
@@ -33,6 +34,24 @@ export function AnalysisPage({
   onDragLeave,
   onDrop
 }) {
+    // 渲染自定义包装器以支持缩放功能
+    const renderTableWrapper = (tableContent) => (
+      <div
+        className={`analysis-table-wrapper table-wrapper${isNarrowViewport ? ' list-local-zoom-enabled' : ''}`}
+        onScroll={onScroll}
+      >
+        <div
+          className="list-local-zoom-surface"
+          style={isNarrowViewport ? {
+            '--list-local-zoom-scale': analysisListScale,
+            '--analysis-row-height': `${analysisItemSize}px`
+          } : undefined}
+        >
+          {tableContent}
+        </div>
+      </div>
+    );
+
   return (
     <div
       className={`results-panel${dragOver ? ' drag-over' : ''}`}
@@ -105,70 +124,22 @@ export function AnalysisPage({
           <Body1 className="hint">支持 .TJA 谱面，兼容任意目录结构</Body1>
         </div>
       ) : (
-        <div
-          className={`analysis-table-wrapper table-wrapper${isNarrowViewport ? ' list-local-zoom-enabled' : ''}`}
-          onScroll={onScroll}
-        >
-          <div
-            className="list-local-zoom-surface"
-            style={isNarrowViewport ? {
-              '--list-local-zoom-scale': analysisListScale,
-              '--analysis-row-height': `${analysisItemSize}px`
-            } : undefined}
-          >
-            <div className="table-grid analysis-virtual-grid" role="table" aria-label="谱面分析表格">
-              <div className="analysis-virtual-header" role="rowgroup">
-                <div className="analysis-virtual-header-row" role="row">
-                  {allColumns.map((column, columnIndex) => (
-                    <div
-                      key={column.id}
-                      role="columnheader"
-                      aria-colindex={columnIndex + 1}
-                      onClick={() => onSort(column.id)}
-                      className={`${column.sortable ? 'sortable' : ''} ${column.headerClassName || ''} analysis-virtual-cell analysis-virtual-header-cell`.trim()}
-                      style={column.style}
-                    >
-                      <span className="header-cell-text">
-                        <span className="header-title-text">{column.label}</span>
-                        {column.sortable ? <span className="sort-indicator">{sortIndicator(column.id)}</span> : null}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="analysis-virtual-row-spacer analysis-virtual-header-spacer" aria-hidden="true" />
-                </div>
-              </div>
-              <div className="analysis-virtual-scroll-root" role="rowgroup" aria-label="谱面分析列表">
-                {analysisVirtualRows.topSpacerHeight > 0 ? (
-                  <div className="analysis-virtual-spacer" style={{ height: `${analysisVirtualRows.topSpacerHeight}px` }} aria-hidden="true" />
-                ) : null}
-                {analysisVirtualRows.visibleRows.map((item) => {
-                  if (!item) return null;
-                  return (
-                    <div key={item.id} className="result-row analysis-virtual-row" role="row" onClick={() => onChartClick(item)}>
-                      {allColumns.map((column, columnIndex) => (
-                        <div
-                          key={`${item.id}-${column.id}`}
-                          role="gridcell"
-                          aria-colindex={columnIndex + 1}
-                          className={`${column.className || ''} analysis-virtual-cell`.trim()}
-                          style={column.style}
-                        >
-                          {column.id === 'favorite'
-                            ? column.renderCell(item)
-                            : <span className="analysis-cell-text">{column.renderCell(item)}</span>}
-                        </div>
-                      ))}
-                      <div className="analysis-virtual-row-spacer analysis-virtual-body-spacer" aria-hidden="true" />
-                    </div>
-                  );
-                })}
-                {analysisVirtualRows.bottomSpacerHeight > 0 ? (
-                  <div className="analysis-virtual-spacer" style={{ height: `${analysisVirtualRows.bottomSpacerHeight}px` }} aria-hidden="true" />
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
+        <VirtualTable
+          columns={allColumns}
+          rows={filteredRows}
+          virtualRows={analysisVirtualRows}
+          onSort={onSort}
+          renderSortIndicator={sortIndicator}
+          renderCell={(row, column) => column.renderCell(row)}
+          onRowClick={onChartClick}
+          gridClassName="table-grid analysis-virtual-grid"
+          headerClassName="analysis-virtual"
+          cellClassName="analysis-virtual"
+          rowClassName="analysis-virtual"
+          gridRole="table"
+          gridLabel="谱面分析表格"
+          renderWrapper={renderTableWrapper}
+        />
       )}
     </div>
   );
