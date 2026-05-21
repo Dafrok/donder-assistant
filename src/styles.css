@@ -1929,6 +1929,13 @@ body {
   flex: 0 0 auto;
 }
 
+.difficulty-info-button,
+.difficulty-info-button:hover,
+.difficulty-info-button:active,
+.difficulty-info-button:focus-visible {
+  background-color: transparent !important;
+}
+
 .result-row {
   cursor: pointer;
 }
@@ -2083,6 +2090,16 @@ body {
 .gap-null {
   background: #f8f9fb;
   color: #98a2b3;
+}
+
+.roll-output-note-1 {
+  background: #ffebee;
+  color: #b42318;
+}
+
+.roll-output-note-2 {
+  background: #eaf2ff;
+  color: #005a9c;
 }
 
 .single-price-panel {

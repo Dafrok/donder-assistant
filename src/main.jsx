@@ -21,6 +21,9 @@ import {
   NavDrawerHeader,
   NavItem,
   NavSectionHeader,
+  Popover,
+  PopoverSurface,
+  PopoverTrigger,
   Spinner,
   createLightTheme,
   Title3,
@@ -77,6 +80,7 @@ const SORTABLE_COLS = {
   rhythmRatioOverall: 'rhythmRatioOverall',
   speed: 'speed',
   speed95: 'speed95',
+  rollEquivalentCoefficient: 'rollEquivalentCoefficient',
   burst: 'burst'
 };
 
@@ -225,6 +229,21 @@ function FilterButton(props) {
 function formatNumber(num) {
   if (num === 0 || !num) return '-';
   return num.toFixed(2);
+}
+
+function extractRollEquivalentOutputs(ratings) {
+  if (!ratings || !Array.isArray(ratings.rollEquivalentOutputs)) return [[], [], 0];
+  return ratings.rollEquivalentOutputs;
+}
+
+function extractRollEquivalentCoefficient(ratings, outputs = []) {
+  const outputCoefficient = Number(outputs?.[2]);
+  if (Number.isFinite(outputCoefficient)) {
+    return outputCoefficient;
+  }
+
+  const fallback = Number(ratings?.rollEquivalent);
+  return Number.isFinite(fallback) ? fallback : 0;
 }
 
 async function probeNetworkReachability(signal) {
@@ -1208,6 +1227,7 @@ function App() {
   const chartIdsBySongIndex = useMemo(() => {
     const grouped = new Map();
     for (const row of currentRows) {
+      if (row.isRollEquivalentVariant) continue;
       if (!grouped.has(row.songIndex)) {
         grouped.set(row.songIndex, []);
       }
@@ -1233,11 +1253,38 @@ function App() {
     },
     {
       id: 'difficulty',
-      label: '难度',
+      style: {
+        width: 'calc(75px * var(--list-local-zoom-scale, 1))',
+        minWidth: 'calc(75px * var(--list-local-zoom-scale, 1))',
+        maxWidth: 'calc(75px * var(--list-local-zoom-scale, 1))',
+        flexBasis: 'calc(75px * var(--list-local-zoom-scale, 1))'
+      },
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <span>难度</span>
+          <Popover positioning="below-start" withArrow>
+            <PopoverTrigger disableButtonEnhancement>
+              <Button
+                appearance="transparent"
+                size="small"
+                icon={<InfoRegular />}
+                className="difficulty-info-button"
+                aria-label="查看滚奏等效谱面标记说明"
+                onClick={(event) => {
+                  event.stopPropagation();
+                }}
+              />
+            </PopoverTrigger>
+            <PopoverSurface>
+              <Body1>* 开头的是该谱面的滚奏等效谱面分析</Body1>
+            </PopoverSurface>
+          </Popover>
+        </span>
+      ),
       sortable: true,
       renderCell: (item) => {
         const diffLabel = DIFFICULTY_LABELS[item.difficulty] || item.difficulty;
-        return <span style={{ color: getDifficultyColor(item.difficulty), fontWeight: 700 }}>{diffLabel}</span>;
+        return <span style={{ color: getDifficultyColor(item.difficulty), fontWeight: 700 }}>{item.isRollEquivalentVariant ? `*${diffLabel}` : diffLabel}</span>;
       }
     },
     {
@@ -1268,6 +1315,12 @@ function App() {
     { id: 'rhythmRatioOverall', label: '节奏占比（整体）', sortable: true, renderCell: (item) => formatNumber(item.ratings.rhythmRatioOverall) },
     { id: 'speed', label: '手速', sortable: true, renderCell: (item) => formatNumber(item.ratings.speed) },
     { id: 'speed95', label: '手速（95线）', sortable: true, renderCell: (item) => formatNumber(item.ratings.speed95) },
+    {
+      id: 'rollEquivalentCoefficient',
+      label: '滚奏等效系数',
+      sortable: true,
+      renderCell: (item) => (item.isRollEquivalentVariant ? formatNumber(item.rollEquivalentCoefficient) : '-')
+    },
     { id: 'burst', label: '爆发', sortable: true, renderCell: (item) => formatNumber(item.ratings.burst) },
     {
       id: 'favorite',
@@ -1321,7 +1374,7 @@ function App() {
       if (!keyword) return true;
       const diffLabel = DIFFICULTY_LABELS[row.difficulty] || row.difficulty;
       const branchLabel = BRANCH_LABELS[row.branchType] || '';
-      const text = `${row.category} ${row.songName} ${diffLabel} ${branchLabel}`.toLowerCase();
+      const text = `${row.category} ${row.songName} ${diffLabel} ${branchLabel} ${row.isRollEquivalentVariant ? '滚奏谱面 滚奏等效' : ''}`.toLowerCase();
       return text.includes(keyword);
     });
   }, [currentRows, diffFilter, searchKeyword, sortState]);
@@ -1338,9 +1391,20 @@ function App() {
     const songName = song?.songName || '';
     const diffLabel = DIFFICULTY_LABELS[selectedChartRow.difficulty] || selectedChartRow.difficulty;
     const branchLabel = BRANCH_LABELS[selectedChartRow.branchType] || '';
-    const result = renderGapContent(gapData);
+    const rollEquivalentOutputs = Array.isArray(selectedChartRow.rollEquivalentOutputs)
+      ? selectedChartRow.rollEquivalentOutputs
+      : extractRollEquivalentOutputs(selectedChartRow.ratings);
+    const rollEquivalentIntervals = Array.isArray(rollEquivalentOutputs[0])
+      ? rollEquivalentOutputs[0].map((value) => {
+        const num = Number(value);
+        return Number.isFinite(num) && num > 0 ? num : null;
+      })
+      : [];
+    const result = selectedChartRow.isRollEquivalentVariant
+      ? renderGapContent([rollEquivalentIntervals])
+      : renderGapContent(gapData);
     return {
-      title: `${songName} - ${diffLabel}${branchLabel ? ` (${branchLabel})` : ''}`,
+      title: `${songName} - ${selectedChartRow.isRollEquivalentVariant ? `*${diffLabel}` : diffLabel}${branchLabel ? ` (${branchLabel})` : ''}`,
       songName,
       difficulty: selectedChartRow.difficulty,
       diffLabel,
@@ -1348,6 +1412,10 @@ function App() {
       branchType: selectedChartRow.branchType,
       branchLabel,
       category: selectedChartRow.category,
+      isRollEquivalentVariant: Boolean(selectedChartRow.isRollEquivalentVariant),
+      rollEquivalentOutputs,
+      rollEquivalentCoefficient: selectedChartRow.rollEquivalentCoefficient,
+      rollEquivalentPreviewNotes: Array.isArray(rollEquivalentOutputs[1]) ? rollEquivalentOutputs[1] : [],
       ratings: selectedChartRow.ratings || null,
       stats: result?.stats || null,
       bars: result?.bars || [],
@@ -1620,6 +1688,13 @@ function App() {
         for (const chart of charts) {
           const level = getChartLevel(sourceSong?.data, chart.difficulty);
           const chartId = await hashText(`${sourceSong?.songHash || song.songName}|${chart.difficulty}|${chart.branchType || 'unbranched'}`);
+          const rollEquivalentOutputs = extractRollEquivalentOutputs(chart.ratings);
+          const rollEquivalentCoefficient = extractRollEquivalentCoefficient(chart.ratings, rollEquivalentOutputs);
+          const baseRatings = {
+            ...(chart.ratings || {}),
+            rollEquivalentCoefficient: 0
+          };
+
           rows.push({
             id: chartId,
             category: song.category,
@@ -1628,8 +1703,32 @@ function App() {
             difficulty: chart.difficulty,
             level,
             branchType: chart.branchType,
-            ratings: chart.ratings
+            ratings: baseRatings,
+            rollEquivalentOutputs,
+            rollEquivalentCoefficient: 0,
+            isRollEquivalentVariant: false
           });
+
+          if (rollEquivalentCoefficient !== 0) {
+            const rollChartId = await hashText(`${sourceSong?.songHash || song.songName}|${chart.difficulty}|${chart.branchType || 'unbranched'}|roll-equivalent`);
+            rows.push({
+              id: rollChartId,
+              category: song.category,
+              songName: song.songName,
+              songIndex: songIdx,
+              difficulty: chart.difficulty,
+              level,
+              branchType: chart.branchType,
+              ratings: {
+                ...baseRatings,
+                rollEquivalent: rollEquivalentCoefficient,
+                rollEquivalentCoefficient
+              },
+              rollEquivalentOutputs,
+              rollEquivalentCoefficient,
+              isRollEquivalentVariant: true
+            });
+          }
         }
       }
 
