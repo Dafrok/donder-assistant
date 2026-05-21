@@ -54,6 +54,7 @@ import {
 } from '@fluentui/react-icons';
 import { calculateDifficulty, warmupPython } from './data-engine.js';
 import { analyzeTjaToJson } from './tjs-analyzer.ts';
+import { ROUTES, NAVIGATION_CONFIG, detectRoutes, getNavValueFromRoutes, isMainDataPage } from './routes.js';
 import AboutPage from './AboutPage.jsx';
 import ChartDetailPage from './ChartDetailPage.jsx';
 import ConstantsDetailPage from './ConstantsDetailPage.jsx';
@@ -926,20 +927,24 @@ function App() {
     }
   }, [diffFilter]);
 
-  const isAboutRoute = location.pathname === '/about';
-  const isConstantsRoute = location.pathname === '/constants';
-  const constantsDetailRouteMatch = matchPath('/constants/:entryId', location.pathname);
-  const isConstantsDetailRoute = Boolean(constantsDetailRouteMatch);
-  const isSinglePriceRoute = location.pathname === '/single-price';
-  const isTargetScoreRoute = location.pathname === '/target-score';
-  const isPracticeRoute = location.pathname === '/practice';
-  const isAnalysisRoute = location.pathname === '/analysis';
-  const isRootRoute = location.pathname === '/';
-  const chartPreviewRouteMatch = matchPath('/chart/:chartId/preview', location.pathname);
-  const chartDetailRouteMatch = matchPath('/chart/:chartId', location.pathname);
-  const chartRouteMatch = chartPreviewRouteMatch || chartDetailRouteMatch;
-  const isChartRoute = Boolean(chartRouteMatch);
-  const isKnownRoute = isRootRoute || isAnalysisRoute || isConstantsRoute || isConstantsDetailRoute || isAboutRoute || isSinglePriceRoute || isTargetScoreRoute || isPracticeRoute || isChartRoute;
+  // 使用路由检测函数获取所有路由状态
+  const routeStates = useMemo(() => detectRoutes(location.pathname, matchPath), [location.pathname, matchPath]);
+  const {
+    isAboutRoute,
+    isConstantsRoute,
+    constantsDetailRouteMatch,
+    isConstantsDetailRoute,
+    isSinglePriceRoute,
+    isTargetScoreRoute,
+    isPracticeRoute,
+    isAnalysisRoute,
+    isRootRoute,
+    chartPreviewRouteMatch,
+    chartDetailRouteMatch,
+    chartRouteMatch,
+    isChartRoute,
+    isKnownRoute
+  } = routeStates;
   const routeChartId = useMemo(() => {
     if (!chartRouteMatch?.params?.chartId) return '';
     try {
@@ -1066,7 +1071,7 @@ function App() {
 
     const applyLayoutVars = () => {
       const headerHeight = headerRef.current?.getBoundingClientRect().height || 0;
-      const footerHeight = (isAnalysisRoute || isConstantsRoute)
+      const footerHeight = isMainDataPage(isAnalysisRoute, isConstantsRoute)
         ? (footerRef.current?.getBoundingClientRect().height || 0)
         : 0;
 
@@ -1097,7 +1102,7 @@ function App() {
     if ('ResizeObserver' in window) {
       resizeObserver = new ResizeObserver(scheduleLayoutVarsUpdate);
       if (headerRef.current) resizeObserver.observe(headerRef.current);
-      if ((isAnalysisRoute || isConstantsRoute) && footerRef.current) resizeObserver.observe(footerRef.current);
+      if (isMainDataPage(isAnalysisRoute, isConstantsRoute) && footerRef.current) resizeObserver.observe(footerRef.current);
     }
 
     window.addEventListener('resize', scheduleLayoutVarsUpdate);
@@ -1925,14 +1930,16 @@ function App() {
     return sortState.asc ? '▲' : '▼';
   }
 
-  const navPathMap = useMemo(() => ({
-    constants: '/constants',
-    analysis: '/analysis',
-    about: '/about',
-    singlePrice: '/single-price',
-    targetScore: '/target-score',
-    practice: '/practice'
-  }), []);
+  // 从导航配置生成路径映射
+  const navPathMap = useMemo(() => {
+    const map = {};
+    NAVIGATION_CONFIG.sections.forEach(section => {
+      section.items.forEach(item => {
+        map[item.value] = item.path;
+      });
+    });
+    return map;
+  }, []);
 
   const handleNavSelect = useCallback((_, data) => {
     const path = navPathMap[data.value];
@@ -1943,13 +1950,8 @@ function App() {
   }, [navigate, navPathMap]);
 
   const selectedNavValue = useMemo(() => {
-    if (isAboutRoute) return 'about';
-    if (isTargetScoreRoute) return 'targetScore';
-    if (isPracticeRoute) return 'practice';
-    if (isSinglePriceRoute) return 'singlePrice';
-    if (isConstantsRoute || isConstantsDetailRoute) return 'constants';
-    return 'analysis';
-  }, [isAboutRoute, isTargetScoreRoute, isPracticeRoute, isSinglePriceRoute, isConstantsRoute, isConstantsDetailRoute]);
+    return getNavValueFromRoutes(routeStates) || 'analysis';
+  }, [routeStates]);
 
   const analysisEffectiveScale = isNarrowViewport ? analysisListScale : 1;
   const analysisItemSize = Math.max(1, Math.round(ANALYSIS_ROW_HEIGHT * analysisEffectiveScale));
@@ -1993,7 +1995,7 @@ function App() {
               />
               {!hideTopBarTitle ? <Title3 className="top-bar-title">Donder Assistant</Title3> : null}
             </div>
-            {(isAnalysisRoute || isConstantsRoute) ? (
+            {isMainDataPage(isAnalysisRoute, isConstantsRoute) ? (
               <div className="actions-row">
                 <Input
                   className="search-input"
@@ -2276,7 +2278,7 @@ function App() {
           ) : null}
         </main>
 
-        {(isAnalysisRoute || isConstantsRoute) ? (
+        {isMainDataPage(isAnalysisRoute, isConstantsRoute) ? (
           <footer className="app-footer" ref={footerRef}>
             <div className="status-strip">
               {isAnalysisRoute ? (
