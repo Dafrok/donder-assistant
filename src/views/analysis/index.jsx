@@ -9,6 +9,7 @@ import { ArrowDownloadRegular, ArrowUploadRegular, CloudArrowUpRegular, StarRegu
 import VirtualTable from '../../components/VirtualTable/index.jsx';
 
 export function AnalysisPage({
+  tableWrapperRef,
   onUploadCharts,
   onUploadAllCharts,
   onExportResults,
@@ -38,6 +39,7 @@ export function AnalysisPage({
     const renderTableWrapper = (tableContent) => (
       <div
         className={`analysis-table-wrapper table-wrapper${isNarrowViewport ? ' list-local-zoom-enabled' : ''}`}
+        ref={tableWrapperRef}
         onScroll={onScroll}
       >
         <div

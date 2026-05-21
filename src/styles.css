@@ -574,7 +574,7 @@ body {
   background: #ffffff;
 }
 
-.constants-route-panel {
+.route-panel {
   height: 100%;
   width: 100%;
   display: flex;
