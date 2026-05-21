@@ -1,7 +1,26 @@
 /**
  * 路由配置文件
- * 包含所有路由定义、常量和路由检测工具函数
+ * 包含所有路由定义、常量、路由检测工具函数和组件映射
  */
+
+// 延迟导入组件，避免循环依赖
+let componentCache = null;
+function getComponents() {
+  if (!componentCache) {
+    componentCache = {
+      HomePage: () => import('./HomePage.jsx').then(m => m.default),
+      AnalysisPage: () => import('./AnalysisPage.jsx').then(m => m.default),
+      AboutPage: () => import('./AboutPage.jsx').then(m => m.default),
+      ChartDetailPage: () => import('./ChartDetailPage.jsx').then(m => m.default),
+      ConstantsDetailPage: () => import('./ConstantsDetailPage.jsx').then(m => m.default),
+      ConstantsTablePage: () => import('./ConstantsTablePage.jsx').then(m => m.default),
+      PracticeModePage: () => import('./PracticeModePage.jsx').then(m => m.default),
+      SingleSongPricePage: () => import('./SingleSongPricePage.jsx').then(m => m.default),
+      TargetScorePage: () => import('./TargetScorePage.jsx').then(m => m.default)
+    };
+  }
+  return componentCache;
+}
 
 // ============================================================================
 // 路由路径常量
@@ -138,6 +157,121 @@ export const NAVIGATION_CONFIG = {
     }
   ]
 };
+
+/**
+ * 路由配置表
+ * 定义每个路由的详细配置，包括组件、布局类型等
+ */
+export const ROUTE_CONFIG = {
+  [ROUTES.HOME]: {
+    name: 'home',
+    component: 'HomePage',
+    layout: 'hidden'
+  },
+  [ROUTES.ANALYSIS]: {
+    name: 'analysis',
+    component: 'AnalysisPage',
+    layout: 'main',
+    isDataPage: true,
+    showSearch: true,
+    showFooter: true
+  },
+  [ROUTES.CONSTANTS]: {
+    name: 'constants',
+    component: 'ConstantsTablePage',
+    layout: 'main',
+    isDataPage: true,
+    showSearch: true,
+    showFooter: true
+  },
+  [ROUTES.CONSTANTS_DETAIL]: {
+    name: 'constants-detail',
+    component: 'ConstantsDetailPage',
+    layout: 'overlay'
+  },
+  [ROUTES.SINGLE_PRICE]: {
+    name: 'single-price',
+    component: 'SingleSongPricePage',
+    layout: 'overlay'
+  },
+  [ROUTES.TARGET_SCORE]: {
+    name: 'target-score',
+    component: 'TargetScorePage',
+    layout: 'overlay'
+  },
+  [ROUTES.PRACTICE]: {
+    name: 'practice',
+    component: 'PracticeModePage',
+    layout: 'overlay'
+  },
+  [ROUTES.ABOUT]: {
+    name: 'about',
+    component: 'AboutPage',
+    layout: 'overlay'
+  },
+  [ROUTES.CHART_DETAIL]: {
+    name: 'chart-detail',
+    component: 'ChartDetailPage',
+    layout: 'overlay'
+  },
+  [ROUTES.CHART_PREVIEW]: {
+    name: 'chart-preview',
+    component: 'ChartDetailPage',
+    layout: 'overlay',
+    preview: true
+  }
+};
+
+/**
+ * 获取路由的组件
+ * @param {string} componentName - 组件名称
+ * @returns {Promise<Component>|Component|null} 组件或 Promise
+ */
+export function getRouteComponent(componentName) {
+  const components = getComponents();
+  if (!componentName || typeof componentName !== 'string') return null;
+  const componentFn = components[componentName];
+  return componentFn ? componentFn() : null;
+}
+
+/**
+ * 检查路由是否为主数据页面
+ * @param {string} pathname - 路径名
+ * @returns {boolean}
+ */
+export function isDataRoute(pathname) {
+  const config = ROUTE_CONFIG[pathname];
+  return config?.isDataPage === true;
+}
+
+/**
+ * 检查路由是否需要显示搜索栏
+ * @param {string} pathname - 路径名
+ * @returns {boolean}
+ */
+export function shouldShowSearch(pathname) {
+  const config = ROUTE_CONFIG[pathname];
+  return config?.showSearch === true;
+}
+
+/**
+ * 检查路由是否需要显示页脚
+ * @param {string} pathname - 路径名
+ * @returns {boolean}
+ */
+export function shouldShowFooter(pathname) {
+  const config = ROUTE_CONFIG[pathname];
+  return config?.showFooter === true;
+}
+
+/**
+ * 获取路由配置
+ * @param {string} pathname - 路径名
+ * @returns {Object|null}
+ */
+export function getRouteConfig(pathname) {
+  return ROUTE_CONFIG[pathname] || null;
+}
 
 /**
  * 路由元数据

@@ -54,11 +54,13 @@ import {
 } from '@fluentui/react-icons';
 import { calculateDifficulty, warmupPython } from './data-engine.js';
 import { analyzeTjaToJson } from './tjs-analyzer.ts';
-import { ROUTES, NAVIGATION_CONFIG, detectRoutes, getNavValueFromRoutes, isMainDataPage } from './routes.js';
+import { ROUTES, NAVIGATION_CONFIG, detectRoutes, getNavValueFromRoutes, shouldShowSearch, shouldShowFooter } from './routes.js';
 import AboutPage from './AboutPage.jsx';
+import AnalysisPage from './AnalysisPage.jsx';
 import ChartDetailPage from './ChartDetailPage.jsx';
 import ConstantsDetailPage from './ConstantsDetailPage.jsx';
 import ConstantsTablePage from './ConstantsTablePage.jsx';
+import HomePage from './HomePage.jsx';
 import PracticeModePage from './PracticeModePage.jsx';
 import SingleSongPricePage from './SingleSongPricePage.jsx';
 import TargetScorePage from './TargetScorePage.jsx';
@@ -1071,7 +1073,7 @@ function App() {
 
     const applyLayoutVars = () => {
       const headerHeight = headerRef.current?.getBoundingClientRect().height || 0;
-      const footerHeight = isMainDataPage(isAnalysisRoute, isConstantsRoute)
+      const footerHeight = shouldShowFooter(location.pathname)
         ? (footerRef.current?.getBoundingClientRect().height || 0)
         : 0;
 
@@ -1102,7 +1104,7 @@ function App() {
     if ('ResizeObserver' in window) {
       resizeObserver = new ResizeObserver(scheduleLayoutVarsUpdate);
       if (headerRef.current) resizeObserver.observe(headerRef.current);
-      if (isMainDataPage(isAnalysisRoute, isConstantsRoute) && footerRef.current) resizeObserver.observe(footerRef.current);
+      if (shouldShowFooter(location.pathname) && footerRef.current) resizeObserver.observe(footerRef.current);
     }
 
     window.addEventListener('resize', scheduleLayoutVarsUpdate);
@@ -1113,13 +1115,13 @@ function App() {
       }
       if (resizeObserver) resizeObserver.disconnect();
     };
-  }, [isAnalysisRoute, isConstantsRoute]);
+  }, [location.pathname]);
 
   useEffect(() => {
     let rafId = 0;
 
     const applyTopBarMode = () => {
-      if (!isAnalysisRoute && !isConstantsRoute) {
+      if (!shouldShowSearch(location.pathname)) {
         setHideTopBarTitle((prev) => (prev ? false : prev));
         return;
       }
@@ -1152,7 +1154,7 @@ function App() {
       }
       if (resizeObserver) resizeObserver.disconnect();
     };
-  }, [isAnalysisRoute, isConstantsRoute]);
+  }, [location.pathname]);
 
   useEffect(() => {
     let active = true;
@@ -1995,7 +1997,7 @@ function App() {
               />
               {!hideTopBarTitle ? <Title3 className="top-bar-title">Donder Assistant</Title3> : null}
             </div>
-            {isMainDataPage(isAnalysisRoute, isConstantsRoute) ? (
+            {shouldShowSearch(location.pathname) ? (
               <div className="actions-row">
                 <Input
                   className="search-input"
@@ -2278,7 +2280,7 @@ function App() {
           ) : null}
         </main>
 
-        {isMainDataPage(isAnalysisRoute, isConstantsRoute) ? (
+        {shouldShowFooter(location.pathname) ? (
           <footer className="app-footer" ref={footerRef}>
             <div className="status-strip">
               {isAnalysisRoute ? (
