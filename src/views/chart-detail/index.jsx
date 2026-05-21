@@ -14,27 +14,9 @@ import {
   StarRegular
 } from '@fluentui/react-icons';
 import { matchPath, useLocation, useNavigate } from 'react-router-dom';
+import { getBranchColor, getDifficultyColor } from '../../config/chart-display.js';
+import { getTouchCenter, getTouchDistance } from '../../utils/touch.js';
 import { createChartView, getChartInfo } from '../../../TJARenderer/src/api.ts';
-
-function getDifficultyColor(difficulty) {
-  const colors = {
-    easy: '#cf202f',
-    normal: '#4d7f2f',
-    hard: '#005a9c',
-    oni: '#8f1d4f',
-    edit: '#5c2d91'
-  };
-  return colors[difficulty] || '#475467';
-}
-
-function getBranchColor(branchType) {
-  const colors = {
-    normal: '#667085',
-    expert: '#0078d4',
-    master: '#b42318'
-  };
-  return colors[branchType] || '#667085';
-}
 
 function formatRatingValue(value) {
   if (value === 0 || !value) return '-';
@@ -122,19 +104,6 @@ function renderChartToCanvas(detail, canvas, options = {}) {
     showAttribution: false,
     dpr
   });
-}
-
-function getTouchDistance(touchA, touchB) {
-  const dx = touchA.clientX - touchB.clientX;
-  const dy = touchA.clientY - touchB.clientY;
-  return Math.hypot(dx, dy);
-}
-
-function getTouchCenter(touchA, touchB) {
-  return {
-    x: (touchA.clientX + touchB.clientX) / 2,
-    y: (touchA.clientY + touchB.clientY) / 2
-  };
 }
 
 function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onToggleFavorite }) {

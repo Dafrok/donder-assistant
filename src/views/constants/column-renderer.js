@@ -53,6 +53,15 @@ export function getBranchTextClass(branch) {
   return '';
 }
 
+export function getBranchSortRank(branch) {
+  const normalized = String(branch || '').trim().toLowerCase();
+  if (!normalized) return 99;
+  if (normalized.includes('master') || normalized.includes('达人')) return 0;
+  if (normalized.includes('expert') || normalized.includes('玄人')) return 1;
+  if (normalized.includes('normal') || normalized.includes('普通')) return 2;
+  return 98;
+}
+
 export function getDifficultyTextClass(difficulty) {
   const normalized = String(difficulty || '').trim().toLowerCase();
   if (!normalized) return '';

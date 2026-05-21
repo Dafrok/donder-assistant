@@ -19,6 +19,7 @@ import JSZip from 'jszip';
 import PracticeBreadcrumb from '../../components/PracticeToolbar/PracticeBreadcrumb.jsx';
 import PracticeToolbar from '../../components/PracticeToolbar/PracticeToolbar.jsx';
 import PracticeStage from '../../components/PracticeToolbar/PracticeStage.jsx';
+import { getTouchCenter, getTouchDistance } from '../../utils/touch.js';
 import { parseTJA } from '../../../TJARenderer/src/tja-parser.ts';
 import {
   BAD_WINDOW,
@@ -142,19 +143,6 @@ function computeHandSpeedBpmFromTapTimes(tapTimes) {
   }
 
   return Math.round(60000 / (averageIntervalMs * 4));
-}
-
-function getTouchDistance(touchA, touchB) {
-  const dx = touchA.clientX - touchB.clientX;
-  const dy = touchA.clientY - touchB.clientY;
-  return Math.hypot(dx, dy);
-}
-
-function getTouchCenter(touchA, touchB) {
-  return {
-    x: (touchA.clientX + touchB.clientX) / 2,
-    y: (touchA.clientY + touchB.clientY) / 2
-  };
 }
 
 function isCoarseInputDevice() {

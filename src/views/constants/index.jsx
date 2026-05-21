@@ -16,6 +16,7 @@ import {
 import VirtualTable from '../../components/VirtualTable/index.jsx';
 import {
   getCategoryBadgeClass,
+  getBranchSortRank,
   getBranchTextClass,
   getDifficultyTextClass,
   getNumericValue,
@@ -94,21 +95,6 @@ function clampListScale(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 1;
   return Math.min(1, Math.max(0.3, numeric));
-}
-
-function getTouchDistance(touchA, touchB) {
-  const dx = touchA.clientX - touchB.clientX;
-  const dy = touchA.clientY - touchB.clientY;
-  return Math.hypot(dx, dy);
-}
-
-function getBranchSortRank(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return 99;
-  if (normalized.includes('master') || normalized.includes('达人')) return 0;
-  if (normalized.includes('expert') || normalized.includes('玄人')) return 1;
-  if (normalized.includes('normal') || normalized.includes('普通')) return 2;
-  return 98;
 }
 
 function ConstantsTablePage({ searchKeyword = '', enableLocalZoom = false, onCountChange, onOpenDetail, isActive = false }) {

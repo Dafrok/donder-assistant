@@ -53,8 +53,16 @@ import {
   StarRegular
 } from '@fluentui/react-icons';
 import { calculateDifficulty, warmupPython } from './data-engine.js';
+import {
+  BRANCH_LABELS,
+  DIFFICULTY_FILTER_OPTIONS,
+  DIFFICULTY_LABELS,
+  getBranchColor,
+  getDifficultyColor
+} from './config/chart-display.js';
 import { analyzeTjaToJson } from './tjs-analyzer.ts';
 import { ROUTES, NAVIGATION_CONFIG, detectRoutes, getNavValueFromRoutes, shouldShowSearch, shouldShowFooter } from './routes.js';
+import { getTouchDistance } from './utils/touch.js';
 import AboutPage from './views/about/index.jsx';
 import AnalysisPage from './views/analysis/index.jsx';
 import ChartDetailPage from './views/chart-detail/index.jsx';
@@ -65,31 +73,6 @@ import PracticeModePage from './views/practice/index.jsx';
 import SingleSongPricePage from './views/single-price/index.jsx';
 import TargetScorePage from './views/target-score/index.jsx';
 import './styles.css';
-
-const DIFFICULTY_LABELS = {
-  easy: '简单',
-  normal: '普通',
-  hard: '困难',
-  oni: '魔王',
-  edit: '魔王(里)'
-};
-
-const BRANCH_LABELS = {
-  unbranched: '',
-  normal: '普通',
-  expert: '玄人',
-  master: '达人'
-};
-
-const DIFFICULTY_FILTER_OPTIONS = [
-  { value: 'all', label: '全部' },
-  { value: 'easy', label: '简单' },
-  { value: 'normal', label: '一般' },
-  { value: 'hard', label: '困难' },
-  { value: 'oni', label: '魔王' },
-  { value: 'edit', label: '魔王(里)' },
-  { value: 'oni+edit', label: '魔王 & 魔王(里)' }
-];
 
 const SORTABLE_COLS = {
   level: 'level',
@@ -251,26 +234,6 @@ function FilterButton(props) {
 function formatNumber(num) {
   if (num === 0 || !num) return '-';
   return num.toFixed(2);
-}
-
-function getDifficultyColor(difficulty) {
-  const colors = {
-    easy: '#cf202f',
-    normal: '#4d7f2f',
-    hard: '#005a9c',
-    oni: '#8f1d4f',
-    edit: '#5c2d91'
-  };
-  return colors[difficulty] || '#475467';
-}
-
-function getBranchColor(branchType) {
-  const colors = {
-    normal: '#667085',
-    expert: '#0078d4',
-    master: '#b42318'
-  };
-  return colors[branchType] || '#667085';
 }
 
 async function probeNetworkReachability(signal) {
@@ -695,12 +658,6 @@ function clampListScale(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 1;
   return Math.min(1, Math.max(0.3, numeric));
-}
-
-function getTouchDistance(touchA, touchB) {
-  const dx = touchA.clientX - touchB.clientX;
-  const dy = touchA.clientY - touchB.clientY;
-  return Math.hypot(dx, dy);
 }
 
 function App() {
