@@ -55,15 +55,15 @@ import {
 import { calculateDifficulty, warmupPython } from './data-engine.js';
 import { analyzeTjaToJson } from './tjs-analyzer.ts';
 import { ROUTES, NAVIGATION_CONFIG, detectRoutes, getNavValueFromRoutes, shouldShowSearch, shouldShowFooter } from './routes.js';
-import AboutPage from './AboutPage.jsx';
-import AnalysisPage from './AnalysisPage.jsx';
-import ChartDetailPage from './ChartDetailPage.jsx';
-import ConstantsDetailPage from './ConstantsDetailPage.jsx';
-import ConstantsTablePage from './ConstantsTablePage.jsx';
-import HomePage from './HomePage.jsx';
-import PracticeModePage from './PracticeModePage.jsx';
-import SingleSongPricePage from './SingleSongPricePage.jsx';
-import TargetScorePage from './TargetScorePage.jsx';
+import AboutPage from './views/about/index.jsx';
+import AnalysisPage from './views/analysis/index.jsx';
+import ChartDetailPage from './views/chart-detail/index.jsx';
+import ConstantsDetailPage from './views/constants-detail/index.jsx';
+import ConstantsTablePage from './views/constants/index.jsx';
+import HomePage from './views/home/index.jsx';
+import PracticeModePage from './views/practice/index.jsx';
+import SingleSongPricePage from './views/single-price/index.jsx';
+import TargetScorePage from './views/target-score/index.jsx';
 import './styles.css';
 
 const DIFFICULTY_LABELS = {

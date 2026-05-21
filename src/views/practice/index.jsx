@@ -16,10 +16,10 @@ import {
 } from '@fluentui/react-components';
 import { DismissRegular, InfoRegular, PauseRegular, PlayRegular } from '@fluentui/react-icons';
 import JSZip from 'jszip';
-import PracticeBreadcrumb from './practice-mode/PracticeBreadcrumb.jsx';
-import PracticeToolbar from './practice-mode/PracticeToolbar.jsx';
-import PracticeStage from './practice-mode/PracticeStage.jsx';
-import { parseTJA } from '../TJARenderer/src/tja-parser.ts';
+import PracticeBreadcrumb from '../../components/PracticeToolbar/PracticeBreadcrumb.jsx';
+import PracticeToolbar from '../../components/PracticeToolbar/PracticeToolbar.jsx';
+import PracticeStage from '../../components/PracticeToolbar/PracticeStage.jsx';
+import { parseTJA } from '../../../TJARenderer/src/tja-parser.ts';
 import {
   BAD_WINDOW,
   BALLOON_POP_FX_MS,
@@ -63,7 +63,7 @@ import {
   resolvePlayableChart,
   resolveTimelineAudioSync,
   summarizeResults
-} from './practice-mode-core.js';
+} from '../../practice-mode-core.js';
 
 const PRACTICE_AUDIO_COMPENSATION_STORAGE_KEY = 'taiko-rating.practice.audio-compensation-ms.v1';
 const PRACTICE_TOUCH_DRUM_OFFSET_X_STORAGE_KEY = 'taiko-rating.practice.touch-drum-offset-x.v1';

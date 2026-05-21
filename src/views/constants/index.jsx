@@ -487,7 +487,7 @@ function ConstantsTablePage({ searchKeyword = '', enableLocalZoom = false, onCou
     }
 
     setLoadingState({ loading: true, error: '' });
-    const worker = new Worker(new URL('./constants-csv.worker.js', import.meta.url), { type: 'module' });
+    const worker = new Worker(new URL('../../constants-csv.worker.js', import.meta.url), { type: 'module' });
 
     const handleMessage = (event) => {
       const { type, payload, message } = event.data || {};

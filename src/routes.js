@@ -8,15 +8,15 @@ let componentCache = null;
 function getComponents() {
   if (!componentCache) {
     componentCache = {
-      HomePage: () => import('./HomePage.jsx').then(m => m.default),
-      AnalysisPage: () => import('./AnalysisPage.jsx').then(m => m.default),
-      AboutPage: () => import('./AboutPage.jsx').then(m => m.default),
-      ChartDetailPage: () => import('./ChartDetailPage.jsx').then(m => m.default),
-      ConstantsDetailPage: () => import('./ConstantsDetailPage.jsx').then(m => m.default),
-      ConstantsTablePage: () => import('./ConstantsTablePage.jsx').then(m => m.default),
-      PracticeModePage: () => import('./PracticeModePage.jsx').then(m => m.default),
-      SingleSongPricePage: () => import('./SingleSongPricePage.jsx').then(m => m.default),
-      TargetScorePage: () => import('./TargetScorePage.jsx').then(m => m.default)
+      HomePage: () => import('./views/home/index.jsx').then(m => m.default),
+      AnalysisPage: () => import('./views/analysis/index.jsx').then(m => m.default),
+      AboutPage: () => import('./views/about/index.jsx').then(m => m.default),
+      ChartDetailPage: () => import('./views/chart-detail/index.jsx').then(m => m.default),
+      ConstantsDetailPage: () => import('./views/constants-detail/index.jsx').then(m => m.default),
+      ConstantsTablePage: () => import('./views/constants/index.jsx').then(m => m.default),
+      PracticeModePage: () => import('./views/practice/index.jsx').then(m => m.default),
+      SingleSongPricePage: () => import('./views/single-price/index.jsx').then(m => m.default),
+      TargetScorePage: () => import('./views/target-score/index.jsx').then(m => m.default)
     };
   }
   return componentCache;

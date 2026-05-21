@@ -5,7 +5,7 @@
 
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ROUTES } from './routes.js';
+import { ROUTES } from '../../routes.js';
 
 export function HomePage() {
   const navigate = useNavigate();

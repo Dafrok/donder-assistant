@@ -14,7 +14,7 @@ import {
   StarRegular
 } from '@fluentui/react-icons';
 import { matchPath, useLocation, useNavigate } from 'react-router-dom';
-import { createChartView, getChartInfo } from '../TJARenderer/src/api.ts';
+import { createChartView, getChartInfo } from '../../../TJARenderer/src/api.ts';
 
 function getDifficultyColor(difficulty) {
   const colors = {
