@@ -44,10 +44,33 @@ function formatRollOutputValue(value) {
 }
 
 function normalizeRollOutputBars(output) {
-  const normalizeValue = (value) => ({
-    text: formatRollOutputValue(value),
-    className: value === null || value === undefined ? 'gap-null' : 'gap-normal'
-  });
+  const normalizeValue = (value) => {
+    if (value === null || value === undefined) {
+      return {
+        text: formatRollOutputValue(value),
+        className: 'gap-null'
+      };
+    }
+
+    const normalized = String(value).trim();
+    if (normalized === '1') {
+      return {
+        text: formatRollOutputValue(value),
+        className: 'roll-output-note-1'
+      };
+    }
+    if (normalized === '2') {
+      return {
+        text: formatRollOutputValue(value),
+        className: 'roll-output-note-2'
+      };
+    }
+
+    return {
+      text: formatRollOutputValue(value),
+      className: 'gap-normal'
+    };
+  };
 
   if (Array.isArray(output)) {
     if (output.length === 0) return [];
@@ -174,10 +197,15 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
   ] : [];
 
   const ratingItems = detail?.ratings ? [
+    {
+      label: detail?.isRollEquivalentVariant ? '滚奏等效系数' : '滚奏等效',
+      value: detail?.isRollEquivalentVariant
+        ? detail?.rollEquivalentCoefficient
+        : detail.ratings.rollEquivalent
+    },
     { label: '体力', value: detail.ratings.stamina },
     { label: '手速', value: detail.ratings.speed },
     { label: '手速（95线）', value: detail.ratings.speed95 },
-    { label: '滚奏等效', value: detail.ratings.rollEquivalent },
     { label: '爆发', value: detail.ratings.burst },
     { label: '复合', value: formatRatingWithRatio(detail.ratings.complex, detail.ratings.complexRatio) },
     { label: '节奏', value: formatRatingWithRatio(detail.ratings.rhythm, detail.ratings.rhythmRatio) }
@@ -189,21 +217,11 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
   const normalMax = formatGapThreshold(gapProfile?.normalMax);
   const rollEquivalentOutputs = Array.isArray(detail?.ratings?.rollEquivalentOutputs)
     ? detail.ratings.rollEquivalentOutputs
-    : [];
-  const rollEquivalentOutputItems = [
-    {
-      label: '滚奏等效音符间距',
-      bars: normalizeRollOutputBars(rollEquivalentOutputs[0])
-    },
-    {
-      label: '滚奏等效音符',
-      bars: normalizeRollOutputBars(rollEquivalentOutputs[1])
-    },
-    {
-      label: '滚奏等效系数',
-      bars: normalizeRollOutputBars(rollEquivalentOutputs[2])
-    }
-  ];
+    : (Array.isArray(detail?.rollEquivalentOutputs) ? detail.rollEquivalentOutputs : []);
+  const rollEquivalentPreviewNotes = Array.isArray(detail?.rollEquivalentPreviewNotes)
+    ? detail.rollEquivalentPreviewNotes
+    : (Array.isArray(rollEquivalentOutputs[1]) ? rollEquivalentOutputs[1] : []);
+  const rollEquivalentPreviewNoteBars = normalizeRollOutputBars(rollEquivalentPreviewNotes);
 
   useEffect(() => {
     overlayScaleRef.current = overlayScale;
@@ -850,7 +868,7 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
                         <div className="chart-detail-stat-block chart-detail-basic-info">
                           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', fontSize: '14px' }}>
                             <div style={{ color: getDifficultyColor(detail.difficulty), fontWeight: 700 }}>
-                              {detail.diffLabel}
+                              {detail?.isRollEquivalentVariant ? `*${detail.diffLabel}` : detail.diffLabel}
                             </div>
                             {detail.level && (
                               <div style={{ color: '#1f4f71' }}>
@@ -918,6 +936,35 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
                       />
                     </button>
                     <Body1 className="hint">点击谱面可进入全屏预览，可缩放与拖动。</Body1>
+                    {detail?.isRollEquivalentVariant ? (
+                      <>
+                        <Body1 className="hint">滚奏等效音符输出（第二返回值）：</Body1>
+                        {rollEquivalentPreviewNoteBars.length ? (
+                          <div className="chart-gap-list gap-list" style={{ marginTop: '8px' }}>
+                            {rollEquivalentPreviewNoteBars.map((bar) => (
+                              <div className="gap-bar" key={`roll-preview-${bar.label}`}>
+                                <span className="gap-bar-label">{bar.label}</span>
+                                <div className="gap-bar-values">
+                                  {bar.values.length ? (
+                                    bar.values.map((value, idx) => (
+                                      <span className={`gap-value ${value.className}`} key={`roll-preview-${bar.label}-${idx}`}>
+                                        {value.text}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="gap-null gap-value" key={`roll-preview-${bar.label}-placeholder`}>
+                                      -
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <Body1 className="hint">暂无滚奏等效音符输出。</Body1>
+                        )}
+                      </>
+                    ) : null}
                     {previewError ? <Body1 className="hint">{previewError}</Body1> : null}
                   </div>
                 ) : (
@@ -959,36 +1006,6 @@ function ChartDetailPage({ detail, chartId = '', onBack, isFavorite = false, onT
                   <Body1 className="hint">该谱面暂无可展示的小节间隔数据。</Body1>
                 )}
               </section>
-
-              {rollEquivalentOutputItems.map((item) => (
-                <section className="chart-detail-card chart-detail-gaps-card" aria-label={item.label} key={item.label}>
-                  <h3 className="chart-detail-card-title">{item.label}</h3>
-                  {item.bars.length ? (
-                    <div className="chart-gap-list gap-list">
-                      {item.bars.map((bar) => (
-                        <div className="gap-bar" key={`${item.label}-${bar.label}`}>
-                          <span className="gap-bar-label">{bar.label}</span>
-                          <div className="gap-bar-values">
-                            {bar.values.length ? (
-                              bar.values.map((value, idx) => (
-                                <span className={`gap-value ${value.className}`} key={`${item.label}-${bar.label}-${idx}`}>
-                                  {value.text}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="gap-null gap-value" key={`${item.label}-${bar.label}-placeholder`}>
-                                -
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <Body1 className="hint">暂无滚奏等效输出数据。</Body1>
-                  )}
-                </section>
-              ))}
             </div>
           </div>
         ) : (
